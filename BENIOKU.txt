@@ -1,0 +1,49 @@
+İZSÜRÜCÜ — TAM PROJE (GÜNCEL SÜRÜM)
+====================================
+Bu paket, AI servis bağlantı düzeltmesini içeren güncel projenin tam halidir
+(SENTINEL VSC-9 · Rev 9.2 · Next.js 16 + Turbopack).
+
+İÇİNDEKİLER
+  src/            uygulama kaynağı (arayüz, adli analiz motorları, API)
+  public/         logo + PDF rapor fontları (DejaVu)
+  prisma/         şema (bilgi amaçlı — adli işlevler veritabanı istemez)
+  package.json, bun.lock, yapılandırma dosyaları
+  .env.example    ortam değişkeni örneği (belge amaçlı; sır içermez)
+
+HIZLI KURULUM — YEREL
+  1) Zip içeriğini bir klasöre açın (örn. C:\Users\230737\Downloads\iz surucu)
+  2) PowerShell:
+       cd "C:\Users\230737\Downloads\iz surucu"
+       npm install
+       npm run dev
+     → http://localhost:3000
+  Not: AI özellikleri (okuma, silme analizi) anahtar ister — aşağıya bakın.
+  Spektral filtreler, karalama/silme varyant tespiti, ince ayar ve raporlar
+  tarayıcıda çalıştığı için anahtarsız kullanılabilir.
+
+AI SERVİS DEĞİŞKENLERİ (yerel .env.local veya Vercel panosu)
+    ZAI_API_KEY   = z.ai anahtarınız  (https://z.ai/manage-apikey/apikey-list)
+    ZAI_TABAN_URL = https://api.z.ai/api/paas/v4
+                    (ZAI_BASE_URL adı da kabul edilir)
+    ZAI_MODEL     = glm-5.3-flash
+  ZAI_VISION_MODE gerekmez; istenirse 'classic' yazılabilir.
+
+GITHUB + VERCEL YAYINI
+  1) PowerShell (ilk kez):
+       cd "C:\Users\230737\Downloads\iz surucu"
+       git init
+       git add .
+       git commit -m "Ilk yukleme"
+       git branch -M main
+       git remote add origin https://github.com/Armagedon-24/iz-surucu.git
+       git push -u origin main
+     (var olan repoda yalnızca: git add . && git commit -m "..." && git push)
+  2) Vercel → Add New Project → bu GitHub deposunu seçin → Deploy.
+  3) Vercel → Settings → Environment Variables → yukarıdaki üç değişkeni
+     Production (isterseniz Preview) için ekleyin → Deployments → Redeploy.
+  4) Sitede karalama/silme sekmelerindeki AI düğmelerini test edin.
+
+GÜVENLİK
+  .env bu pakette YOKTUR ve .gitignore ile korunur. Gerçek anahtarları
+  asla repoya göndermeyin; yalnızca Vercel panosunda (veya yerel .env.local'de)
+  tanımlayın.
