@@ -15,7 +15,7 @@ import {
   Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
-  Scissors, Undo2,
+  Scissors, Undo2, FlaskConical,
 } from 'lucide-react';
 import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
@@ -24,6 +24,7 @@ import { AiPanel } from '@/components/forensic/ai-panel';
 import { ReportPanel } from '@/components/forensic/report-panel';
 import { RecoveryPanel } from '@/components/forensic/recovery-panel';
 import { ErasurePanel } from '@/components/forensic/erasure-panel';
+import { LabPanel } from '@/components/forensic/lab-panel';
 import { DirectionPanel } from '@/components/forensic/direction-panel';
 import { CameraCapture } from '@/components/forensic/camera-modal';
 import {
@@ -43,6 +44,7 @@ const TAB_HINTS: Record<string, string> = {
   yon: 'Çizgi yönü taraması — girinti ve karalama yapılarının yönünü bulun.',
   karalama: 'Karalanmış yazının altını 26 teknikle ortaya çıkarır.',
   silme: 'Kimyasal silme kalıntılarını görünür kılar.',
+  lab: 'Gerçek laboratuvar teknikleri: UV florisans, IR lüminesans, ESDA girinti, CLAHE, kanal ayrıştırma.',
   ocr: 'Metni makineyle okur — bölge seçerek isabeti artırın.',
   ai: 'YZ adli analiz: bulgular, mürekkep farkları, silme şüphesi.',
   rapor: 'Vaka bilgileri, anlık görüntüler ve resmî PDF rapor.',
@@ -547,15 +549,16 @@ export default function Home() {
         {/* kontrol paneli */}
         <aside className="flex min-h-0 flex-col">
           <Tabs defaultValue="bant" onValueChange={setActiveTab} className="flex h-full min-h-0 flex-col">
-            <TabsList className="mx-2 mt-2 flex w-auto shrink-0 overflow-x-auto rounded-lg bg-card/60 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <TabsTrigger value="bant" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><Radar className="size-3" />BANT</TabsTrigger>
-              <TabsTrigger value="islem" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><Contrast className="size-3" />İŞLEM</TabsTrigger>
-              <TabsTrigger value="yon" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Compass className="size-3" />YÖN</TabsTrigger>
-              <TabsTrigger value="karalama" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
-              <TabsTrigger value="silme" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
-              <TabsTrigger value="ocr" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
-              <TabsTrigger value="ai" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
-              <TabsTrigger value="rapor" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
+            <TabsList className="mx-2 mt-2 flex h-auto w-auto shrink-0 flex-wrap justify-center gap-y-1 rounded-lg bg-card/60 p-1">
+              <TabsTrigger value="bant" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><Radar className="size-3" />BANT</TabsTrigger>
+              <TabsTrigger value="islem" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><Contrast className="size-3" />İŞLEM</TabsTrigger>
+              <TabsTrigger value="yon" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Compass className="size-3" />YÖN</TabsTrigger>
+              <TabsTrigger value="karalama" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
+              <TabsTrigger value="silme" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
+              <TabsTrigger value="lab" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-cyan-400"><FlaskConical className="size-3" />LAB</TabsTrigger>
+              <TabsTrigger value="ocr" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
+              <TabsTrigger value="ai" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
+              <TabsTrigger value="rapor" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
             </TabsList>
             <p className="mx-3 mt-1 shrink-0 truncate font-mono text-[9px] text-muted-foreground/80">
               {TAB_HINTS[activeTab] ?? ''}
@@ -579,6 +582,10 @@ export default function Home() {
                 <TabsContent value="silme" className="mt-0">
                   <ErasurePanel original={srcImg} region={region}
                     ocrText={ocrResults[0]?.text ?? ''} onApply={handleApplyRecovery}
+                    onLivePreview={setLivePreview} />
+                </TabsContent>
+                <TabsContent value="lab" className="mt-0">
+                  <LabPanel original={srcImg} onApply={handleApplyRecovery}
                     onLivePreview={setLivePreview} />
                 </TabsContent>
                 <TabsContent value="ocr" className="mt-0">
