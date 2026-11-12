@@ -423,7 +423,9 @@ export default function Home() {
                 <Loader2 className="size-3 animate-spin" /> İŞLENİYOR
               </Badge>
             )}
-            <div className="ml-auto flex items-center gap-1.5">
+            {/* sağ buton grubu — mobilde sarmalanabilir (kesme/anomali butonları
+                genişleyince 390px'te ekranı taşırıyordu) */}
+            <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
               {/* karşılaştırma modu */}
               <div className="flex items-center rounded-md border border-border bg-card/60 p-0.5">
                 <Button size="icon" variant="ghost"

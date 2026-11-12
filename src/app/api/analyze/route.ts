@@ -274,9 +274,11 @@ function friendlyError(e: unknown): { message: string; status: number } {
   if (/401|X-Token|unauthorized|kimlik/i.test(msg)) {
     return {
       message:
-        'AI servis kimliği doğrulanamadı: ZAI_API_KEY anahtarı geçersiz olabilir veya ' +
-        'oturum sorunu yaşanıyor. Anahtarı (z.ai → API Keys) doğrulayıp birkaç saniye ' +
-        'sonra tekrar deneyin.',
+        'AI servis anahtarı reddedildi (401): ZAI_API_KEY geçersiz, süresi dolmuş veya ' +
+        'taban adresle uyuşmuyor. z.ai → API Keys sayfasından geçerli anahtarı alıp ' +
+        'dağıtım ortam değişkenlerine (Vercel: Settings → Environment Variables) girin; ' +
+        'kaydettikten sonra yeniden dağıtım (redeploy) gerekir. Birkaç saniye sonra ' +
+        'tekrar deneyin.',
       status: 502,
     };
   }

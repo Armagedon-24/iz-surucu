@@ -6,7 +6,7 @@
  *  - /api/*                              → her zaman ağ (asla önbelleklenmez)
  *  - diğer same-origin GET (ikon, font)  → stale-while-revalidate
  */
-const VERSION = 'izsurucu-v1';
+const VERSION = 'izsurucu-v2';
 const CORE = [
   '/',
   '/manifest.webmanifest',
@@ -63,7 +63,10 @@ async function staleWhileRevalidate(req) {
 async function networkFirstShell(req) {
   const cache = await caches.open(VERSION);
   try {
-    const res = await fetch(req);
+    // cache: 'no-store' — Next prerender HTML'i Cache-Control: s-maxage=31536000
+    // ile servis ediyor; normal fetch tarayıcı HTTP önbelleğine takılıp DEPLOY
+    // SONRASI ESKİ SÜRÜM döndürebiliyordu. Gezinmeler her zaman taze çekilir.
+    const res = await fetch(req, { cache: 'no-store' });
     if (res.ok) cache.put('/', res.clone());
     return res;
   } catch {

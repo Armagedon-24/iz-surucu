@@ -47,9 +47,9 @@ function hitHandle(
   r: CropRect | null,
   px: number, py: number,
   tx: number, ty: number, scale: number,
+  tol: number,
 ): string {
   if (!r) return 'new';
-  const tol = 16;
   const pts = handlePoints(r);
   for (let i = 0; i < pts.length; i++) {
     const sx = tx + pts[i][0] * scale;
@@ -108,6 +108,18 @@ export function ImageViewer(props: ViewerProps) {
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
   const [panning, setPanning] = useState(false);
+  /** Dokunmatik cihaz (coarse pointer) — parmak toleransları büyütülür. */
+  const coarseRef = useRef(false);
+  useEffect(() => {
+    coarseRef.current =
+      typeof window !== 'undefined' &&
+      !!window.matchMedia?.('(pointer: coarse)').matches;
+  }, []);
+  /** Aktif işaretçiler — iki parmak pinch-zoom için izlenir. */
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    dist: number; scale: number; cx: number; cy: number; tx: number; ty: number;
+  } | null>(null);
   const dragState = useRef<{
     mode: 'pan' | 'region' | 'divider' | 'crop' | null;
     sx: number; sy: number; stx: number; sty: number;
@@ -238,8 +250,9 @@ export function ImageViewer(props: ViewerProps) {
       ctx.strokeStyle = '#fbbf24';
       ctx.lineWidth = Math.max(2, 2 / scale);
       ctx.strokeRect(x, y, w, h);
-      // tutamaçlar (ekranda sabit ~12px)
-      const hs = Math.min(60, Math.max(8, 12 / scale));
+      // tutamaçlar — ekranda sabit boyut: dokunmatikte parmak boyutu (26px),
+      // farede hassas boyut (12px)
+      const hs = Math.min(72, Math.max(8, (coarseRef.current ? 26 : 12) / scale));
       ctx.fillStyle = '#ffffff';
       ctx.strokeStyle = 'rgba(0,0,0,0.6)';
       ctx.lineWidth = Math.max(1, 1 / scale);
@@ -349,13 +362,42 @@ export function ImageViewer(props: ViewerProps) {
     };
   };
 
+  /** İşaretçi yakalama — sentetik/serbest bırakılmış işaretçilerde patlamasın. */
+  const capturePointer = (e: React.PointerEvent, target?: Element | null) => {
+    try {
+      (target ?? containerRef.current)?.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* işaretçi artık aktif değil — sürükleme yine de aynı hedefe akar */
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
+    // pinch-zoom: ikinci parmak inince sürükleme iptal, pinch tabanı kaydet
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      const pts = [...pointers.current.values()];
+      const rect = containerRef.current!.getBoundingClientRect();
+      const [a, b] = pts;
+      pinch.current = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        scale,
+        cx: (a.x + b.x) / 2 - rect.left,
+        cy: (a.y + b.y) / 2 - rect.top,
+        tx, ty,
+      };
+      dragState.current.mode = null;
+      setPanning(false);
+      return;
+    }
+
     const rect = containerRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+    // dokunmatikte parmak ucuna yumuşak tolerans, farede hassas tolerans
+    const hitTol = coarseRef.current ? 30 : 16;
 
     if (cropMode) {
-      const handle = hitHandle(cropRect, px, py, tx, ty, scale);
+      const handle = hitHandle(cropRect, px, py, tx, ty, scale, hitTol);
       const p = toImage(e.clientX, e.clientY);
       dragState.current = {
         mode: 'crop', handle,
@@ -366,22 +408,38 @@ export function ImageViewer(props: ViewerProps) {
       if (handle === 'new') {
         onCropRect({ x: Math.max(0, p.x), y: Math.max(0, p.y), w: 0, h: 0 });
       }
-      containerRef.current!.setPointerCapture(e.pointerId);
+      capturePointer(e);
       return;
     }
 
     if (selectMode) {
       const p = toImage(e.clientX, e.clientY);
       dragState.current = { mode: 'region', sx: e.clientX, sy: e.clientY, stx: tx, sty: ty, rx0: p.x, ry0: p.y };
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      capturePointer(e, e.target as Element);
       return;
     }
     dragState.current = { mode: 'pan', sx: px, sy: py, stx: tx, sty: ty, rx0: 0, ry0: 0 };
-    containerRef.current!.setPointerCapture(e.pointerId);
+    capturePointer(e);
     setPanning(true);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    // işaretçi konumunu güncelle; pinch aktifse zoom'u sür
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinch.current && pointers.current.size >= 2) {
+      const base = pinch.current;
+      const pts = [...pointers.current.values()];
+      const [a, b] = pts;
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const ns = Math.min(8, Math.max(0.03, base.scale * (d / base.dist)));
+      const f = ns / base.scale;
+      setTx(base.cx - (base.cx - base.tx) * f);
+      setTy(base.cy - (base.cy - base.ty) * f);
+      setScale(ns);
+      return;
+    }
     const ds = dragState.current;
     if (!ds.mode) return;
     const rect = containerRef.current!.getBoundingClientRect();
@@ -445,7 +503,9 @@ export function ImageViewer(props: ViewerProps) {
     }
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e?: React.PointerEvent) => {
+    pointers.current.delete(e?.pointerId ?? -1);
+    if (pointers.current.size < 2) pinch.current = null;
     if (dragState.current.mode === 'region') {
       onSelectMode(false);
     }
@@ -480,7 +540,13 @@ export function ImageViewer(props: ViewerProps) {
     <div className="relative h-full w-full overflow-hidden bg-black" ref={containerRef}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp} onDoubleClick={onDoubleClick}
-      style={{ cursor: cropMode ? 'crosshair' : selectMode ? 'crosshair' : panning ? 'grabbing' : 'grab' }}
+      // touch-action: none — mobil tarayıcı dokunma sürüklemeyi sayfa kaydırması
+      // sanıp pointercancel göndermesin (yoksa crop/pan/OCR bölgesi ölüyordu);
+      // sayfa kaydırma görüntüleyici dışındaki alanlardan yapılır
+      style={{
+        cursor: cropMode ? 'crosshair' : selectMode ? 'crosshair' : panning ? 'grabbing' : 'grab',
+        touchAction: 'none',
+      }}
       role="application" aria-label="Adli görüntü görüntüleyicisi"
     >
       {/* sahne */}
@@ -526,9 +592,9 @@ export function ImageViewer(props: ViewerProps) {
         </div>
       )}
 
-      {/* HUD üst */}
-      <div className="pointer-events-none absolute left-3 top-3 z-10 font-mono text-[10px] leading-relaxed text-emerald-400/90">
-        <div className="rounded border border-emerald-900/60 bg-black/70 px-2.5 py-1.5 backdrop-blur-sm">
+      {/* HUD üst — uzun dosya adları mobilde kutudan taşmasın */}
+      <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] font-mono text-[10px] leading-relaxed text-emerald-400/90">
+        <div className="break-words rounded border border-emerald-900/60 bg-black/70 px-2.5 py-1.5 backdrop-blur-sm">
           <div>{hudLeft}</div>
           {hudRight && <div className="text-amber-500/90">{hudRight}</div>}
         </div>
@@ -545,17 +611,18 @@ export function ImageViewer(props: ViewerProps) {
         </div>
       )}
 
-      {/* histogram HUD */}
+      {/* histogram HUD — mobilde küçük alanda kalabalık yapmasın */}
       <canvas
         ref={histCanvasRef}
         width={190}
         height={54}
-        className="pointer-events-none absolute bottom-3 left-3 z-10 rounded border border-emerald-900/50"
+        className="pointer-events-none absolute bottom-3 left-3 z-10 hidden rounded border border-emerald-900/50 sm:block"
         aria-label="Yoğunluk histogramı"
       />
 
-      {/* zoom kontrolleri */}
-      <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
+      {/* zoom kontrolleri — kesme modunda gereksiz, gizle (mobilde yığılmayı önler) */}
+      {!cropMode && (
+        <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
         <div className="flex items-center gap-1.5 rounded-md border border-border bg-black/75 p-1.5 backdrop-blur-sm">
           <Button size="icon" variant="ghost" className="size-8" onClick={() => { const r = containerRef.current!.getBoundingClientRect(); zoomAt(0.8, r.width / 2, r.height / 2); }} aria-label="Uzaklaş">
             <Minus className="size-4" />
@@ -582,7 +649,8 @@ export function ImageViewer(props: ViewerProps) {
             <ScanSearch className="size-3.5" /> Görüntü üzerinde sürükleyin
           </div>
         )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
