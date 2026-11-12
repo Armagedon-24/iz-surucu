@@ -22,6 +22,46 @@ export interface OcrBox {
   conf: number;
 }
 
+/** Kesme çerçevesi — görüntü pikseli cinsinden. */
+export interface CropRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Çerçeve tutamaç noktaları (8 adet, sırayla: nw n ne e se s sw w). */
+function handlePoints(r: CropRect): [number, number][] {
+  const { x, y, w, h } = r;
+  return [
+    [x, y], [x + w / 2, y], [x + w, y],
+    [x + w, y + h / 2], [x + w, y + h],
+    [x + w / 2, y + h], [x, y + h], [x, y + h / 2],
+  ];
+}
+
+const HANDLE_NAMES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
+
+/** Ekran pikseli verilen noktanın tutamaç/taşı/yeni seçim hit-testi. */
+function hitHandle(
+  r: CropRect | null,
+  px: number, py: number,
+  tx: number, ty: number, scale: number,
+): string {
+  if (!r) return 'new';
+  const tol = 16;
+  const pts = handlePoints(r);
+  for (let i = 0; i < pts.length; i++) {
+    const sx = tx + pts[i][0] * scale;
+    const sy = ty + pts[i][1] * scale;
+    if (Math.abs(px - sx) <= tol && Math.abs(py - sy) <= tol) return HANDLE_NAMES[i];
+  }
+  const rx = tx + r.x * scale;
+  const ry = ty + r.y * scale;
+  if (px >= rx && px <= rx + r.w * scale && py >= ry && py <= ry + r.h * scale) return 'move';
+  return 'new';
+}
+
 interface ViewerProps {
   original: ImageData | null;
   processed: ImageData | null;
@@ -45,13 +85,17 @@ interface ViewerProps {
   showBoxes: boolean;
   anomalies: AnomalyRegion[];
   showAnomalies: boolean;
+  /** Kesme modu — İnceleme Varyantı görüntüsü üzerinde ayarlanabilir çerçeve. */
+  cropMode: boolean;
+  cropRect: CropRect | null;
+  onCropRect: (r: CropRect | null) => void;
 }
 
 export function ImageViewer(props: ViewerProps) {
   const {
     original, processed, livePreview, hist, hudLeft, hudRight, compareMode,
     comparePct, onComparePct, selectMode, onSelectMode, region, onRegionDone,
-    boxes, showBoxes, anomalies, showAnomalies,
+    boxes, showBoxes, anomalies, showAnomalies, cropMode, cropRect, onCropRect,
   } = props;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -65,9 +109,11 @@ export function ImageViewer(props: ViewerProps) {
   const [ty, setTy] = useState(0);
   const [panning, setPanning] = useState(false);
   const dragState = useRef<{
-    mode: 'pan' | 'region' | 'divider' | null;
+    mode: 'pan' | 'region' | 'divider' | 'crop' | null;
     sx: number; sy: number; stx: number; sty: number;
     rx0: number; ry0: number;
+    handle?: string;
+    cr?: CropRect;
   }>({ mode: null, sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0 });
 
   const iw = processed?.width ?? original?.width ?? 1;
@@ -167,7 +213,53 @@ export function ImageViewer(props: ViewerProps) {
       ctx.font = `bold ${fs}px ui-monospace, monospace`;
       ctx.fillText('OCR BÖLGESİ', rx + 6, ry - 8 < fs ? ry + fs + 2 : ry - 8);
     }
-  }, [boxes, showBoxes, anomalies, showAnomalies, region, iw, ih]);
+
+    /* ---------- kesme çerçevesi ---------- */
+    if (cropMode && cropRect) {
+      const { x, y, w, h } = cropRect;
+      // çerçeve dışını karart
+      ctx.fillStyle = 'rgba(0,0,0,0.62)';
+      ctx.fillRect(0, 0, iw, Math.max(0, y));
+      ctx.fillRect(0, y + h, iw, Math.max(0, ih - y - h));
+      ctx.fillRect(0, y, Math.max(0, x), h);
+      ctx.fillRect(x + w, y, Math.max(0, iw - x - w), h);
+      // üçler kuralı
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = Math.max(1, 1 / scale);
+      ctx.beginPath();
+      for (let i = 1; i <= 2; i++) {
+        ctx.moveTo(x + (w * i) / 3, y);
+        ctx.lineTo(x + (w * i) / 3, y + h);
+        ctx.moveTo(x, y + (h * i) / 3);
+        ctx.lineTo(x + w, y + (h * i) / 3);
+      }
+      ctx.stroke();
+      // kenar
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = Math.max(2, 2 / scale);
+      ctx.strokeRect(x, y, w, h);
+      // tutamaçlar (ekranda sabit ~12px)
+      const hs = Math.min(60, Math.max(8, 12 / scale));
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = Math.max(1, 1 / scale);
+      for (const [hx, hy] of handlePoints(cropRect)) {
+        ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+        ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+      }
+      // boyut etiketi — çerçeve içinde üst-sol (HUD ile çakışmasın); çerçeve çok
+      // alçaksa çerçevenin altına taşır
+      const fs = Math.min(48, Math.max(13, 14 / scale));
+      ctx.font = `bold ${fs}px ui-monospace, monospace`;
+      const label = `${Math.round(w)}×${Math.round(h)} px`;
+      const tw = ctx.measureText(label).width + fs * 0.8;
+      const ly = h > fs * 2.6 ? y + fs * 1.9 : y + h + fs * 1.9;
+      ctx.fillStyle = 'rgba(0,0,0,0.82)';
+      ctx.fillRect(x + 2, ly - fs, tw, fs * 1.45);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText(label, x + 2 + fs * 0.4, ly);
+    }
+  }, [boxes, showBoxes, anomalies, showAnomalies, region, cropMode, cropRect, scale, iw, ih]);
 
   /* ---------- histogram HUD ---------- */
   useEffect(() => {
@@ -262,6 +354,22 @@ export function ImageViewer(props: ViewerProps) {
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
 
+    if (cropMode) {
+      const handle = hitHandle(cropRect, px, py, tx, ty, scale);
+      const p = toImage(e.clientX, e.clientY);
+      dragState.current = {
+        mode: 'crop', handle,
+        sx: px, sy: py, stx: tx, sty: ty,
+        rx0: p.x, ry0: p.y,
+        cr: cropRect ? { ...cropRect } : null,
+      };
+      if (handle === 'new') {
+        onCropRect({ x: Math.max(0, p.x), y: Math.max(0, p.y), w: 0, h: 0 });
+      }
+      containerRef.current!.setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (selectMode) {
       const p = toImage(e.clientX, e.clientY);
       dragState.current = { mode: 'region', sx: e.clientX, sy: e.clientY, stx: tx, sty: ty, rx0: p.x, ry0: p.y };
@@ -297,6 +405,43 @@ export function ImageViewer(props: ViewerProps) {
     } else if (ds.mode === 'divider') {
       const pct = Math.max(0, Math.min(100, ((px - tx) / (iw * scale)) * 100));
       onComparePct(pct);
+    } else if (ds.mode === 'crop') {
+      const p = toImage(e.clientX, e.clientY);
+      const ux = p.x;
+      const uy = p.y;
+      const MIN = 8; // en küçük kesme alanı (görüntü pikseli)
+      if (ds.handle === 'new' || !ds.cr) {
+        // boş alanda sürükle → yeni çerçeve
+        const x = Math.max(0, Math.min(iw, Math.min(ds.rx0, ux)));
+        const y = Math.max(0, Math.min(ih, Math.min(ds.ry0, uy)));
+        onCropRect({
+          x, y,
+          w: Math.min(iw - x, Math.abs(ux - ds.rx0)),
+          h: Math.min(ih - y, Math.abs(uy - ds.ry0)),
+        });
+      } else {
+        const b = ds.cr;
+        const dx = ux - ds.rx0;
+        const dy = uy - ds.ry0;
+        const hnd = ds.handle ?? '';
+        let nx = b.x, ny = b.y, nw = b.w, nh = b.h;
+        if (hnd === 'move') {
+          nx = Math.max(0, Math.min(iw - b.w, b.x + dx));
+          ny = Math.max(0, Math.min(ih - b.h, b.y + dy));
+        } else {
+          if (hnd.includes('w')) {
+            nx = Math.max(0, Math.min(b.x + b.w - MIN, b.x + dx));
+            nw = b.w - (nx - b.x);
+          }
+          if (hnd.includes('e')) nw = Math.max(MIN, Math.min(iw - b.x, b.w + dx));
+          if (hnd.includes('n')) {
+            ny = Math.max(0, Math.min(b.y + b.h - MIN, b.y + dy));
+            nh = b.h - (ny - b.y);
+          }
+          if (hnd.includes('s')) nh = Math.max(MIN, Math.min(ih - b.y, b.h + dy));
+        }
+        onCropRect({ x: nx, y: ny, w: nw, h: nh });
+      }
     }
   };
 
@@ -335,7 +480,7 @@ export function ImageViewer(props: ViewerProps) {
     <div className="relative h-full w-full overflow-hidden bg-black" ref={containerRef}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp} onDoubleClick={onDoubleClick}
-      style={{ cursor: selectMode ? 'crosshair' : panning ? 'grabbing' : 'grab' }}
+      style={{ cursor: cropMode ? 'crosshair' : selectMode ? 'crosshair' : panning ? 'grabbing' : 'grab' }}
       role="application" aria-label="Adli görüntü görüntüleyicisi"
     >
       {/* sahne */}

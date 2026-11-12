@@ -15,8 +15,9 @@ import {
   Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
+  Scissors, Undo2,
 } from 'lucide-react';
-import { ImageViewer, type OcrBox } from '@/components/forensic/viewer';
+import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
 import { OcrPanel } from '@/components/forensic/ocr-panel';
 import { AiPanel } from '@/components/forensic/ai-panel';
@@ -71,6 +72,10 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [activeTab, setActiveTab] = useState('bant');
+  // inceleme varyantı kesme modu
+  const [cropMode, setCropMode] = useState(false);
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
+  const [cropUndo, setCropUndo] = useState<ImageData | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const caseNo = useCaseStore((s) => s.caseNo);
@@ -92,6 +97,9 @@ export default function Home() {
         setParams(DEFAULT_PARAMS);
         setRecoveryMode(false);
         setLivePreview(null);
+        setCropMode(false);
+        setCropRect(null);
+        setCropUndo(null);
         toast({ title: 'Görüntü yüklendi', description: `${img.width}×${img.height} px — incelemeye hazır` });
       } catch (e) {
         toast({ title: 'Görüntü okunamadı', description: (e as Error).message, variant: 'destructive' });
@@ -157,6 +165,9 @@ export default function Home() {
   /* ---------------- karalama inceleme ---------------- */
   const changeParams = useCallback((p: Partial<Params>) => {
     setRecoveryMode(false); // panel ayarı değişince varyant geçersiz
+    setCropMode(false);
+    setCropRect(null);
+    setCropUndo(null);
     setParams((s) => ({ ...s, ...p }));
   }, []);
 
@@ -164,8 +175,63 @@ export default function Home() {
     const g = mixToGray(out, [0.299, 0.587, 0.114]);
     setProcessed({ out, hist: histogram(g), ms: 0 });
     setRecoveryMode(true);
+    setCropMode(false);
+    setCropRect(null);
+    setCropUndo(null);
     setLivePreview(null); // taahhüt edildi — canlı katmanı kapat, tam çözünürlüğü göster
   }, []);
+
+  /* ---------------- inceleme varyantı kesme ---------------- */
+  const enterCrop = useCallback(() => {
+    if (!processed) return;
+    setSelectMode(false);
+    setLivePreview(null);
+    // varsayılan çerçeve: görüntünün %80'i, merkezde
+    setCropRect({
+      x: processed.out.width * 0.1,
+      y: processed.out.height * 0.1,
+      w: processed.out.width * 0.8,
+      h: processed.out.height * 0.8,
+    });
+    setCropMode(true);
+  }, [processed]);
+
+  const exitCrop = useCallback(() => {
+    setCropMode(false);
+    setCropRect(null);
+  }, []);
+
+  const applyCrop = useCallback(() => {
+    if (!processed || !cropRect) return;
+    const src = processed.out;
+    const x0 = Math.max(0, Math.min(src.width - 8, Math.round(cropRect.x)));
+    const y0 = Math.max(0, Math.min(src.height - 8, Math.round(cropRect.y)));
+    const cw = Math.max(8, Math.min(src.width - x0, Math.round(cropRect.w)));
+    const ch = Math.max(8, Math.min(src.height - y0, Math.round(cropRect.h)));
+    const out = new ImageData(cw, ch);
+    for (let y = 0; y < ch; y++) {
+      const sp = ((y0 + y) * src.width + x0) * 4;
+      out.data.set(src.data.subarray(sp, sp + cw * 4), y * cw * 4);
+    }
+    setCropUndo(src);
+    setProcessed({ out, hist: histogram(mixToGray(out, [0.299, 0.587, 0.114])), ms: 0 });
+    setCropMode(false);
+    setCropRect(null);
+    toast({
+      title: `Görüntü kesildi: ${cw}×${ch} px`,
+      description: 'İnceleme varyantı güncellendi — GERİ AL ile eski hâline dönebilirsiniz.',
+    });
+  }, [processed, cropRect, toast]);
+
+  const undoCrop = useCallback(() => {
+    if (!cropUndo || !processed) return;
+    setProcessed({ out: cropUndo, hist: histogram(mixToGray(cropUndo, [0.299, 0.587, 0.114])), ms: 0 });
+    setCropUndo(null);
+    toast({
+      title: 'Kesme geri alındı',
+      description: `${cropUndo.width}×${cropUndo.height} px görüntü restore edildi.`,
+    });
+  }, [cropUndo, processed, toast]);
 
   /* ---------------- anomali taraması ---------------- */
   const runScan = useCallback(() => {
@@ -205,6 +271,9 @@ export default function Home() {
     setSrcImg(out);
     setRecoveryMode(false);
     setLivePreview(null);
+    setCropMode(false);
+    setCropRect(null);
+    setCropUndo(null);
   };
 
   const exportPng = () => {
@@ -225,7 +294,7 @@ export default function Home() {
   const hudRight = livePreview
     ? 'CANLI İNCE AYAR · İYİLEŞTİRMELER GÖRÜNTÜLEYİCIDE ANLIK GÖRÜNÜR · UYGULA İLE KALICI OLUR'
     : recoveryMode
-      ? 'MOD: İNCELEME VARYANTI · KURTARMA ATÖLYESİ · TAM ÇÖZÜNÜRLÜK'
+      ? `MOD: İNCELEME VARYANTI · ${processed ? `${processed.out.width}×${processed.out.height} PX` : 'TAM ÇÖZÜNÜRLÜK'} · KURTARMA ATÖLYESİ`
       : processed
         ? `MOD: ${band.name.toUpperCase()} (${band.nm}) · ${paramsSummary(params).toUpperCase()} · ${processed.ms.toFixed(0)}MS`
         : '';
@@ -371,6 +440,20 @@ export default function Home() {
                   <Columns2 className="size-3.5" />
                 </Button>
               </div>
+              {recoveryMode && processed && (
+                <Button size="sm" variant={cropMode ? 'default' : 'outline'}
+                  onClick={() => (cropMode ? exitCrop() : enterCrop())}
+                  className={`h-8 gap-1.5 font-mono text-[10px] ${cropMode ? 'bg-amber-600 text-black hover:bg-amber-500' : 'border-sky-800/60 text-sky-300 hover:bg-sky-950/40'}`}>
+                  <Scissors className="size-3.5" />
+                  {cropMode ? 'KESME MODU AÇIK' : 'GÖRÜNTÜYÜ KES'}
+                </Button>
+              )}
+              {recoveryMode && processed && cropUndo && (
+                <Button size="sm" variant="outline" onClick={undoCrop}
+                  className="h-8 gap-1.5 border-sky-800/60 font-mono text-[10px] text-sky-300 hover:bg-sky-950/40">
+                  <Undo2 className="size-3.5" /> GERİ AL
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={runScan} disabled={scanning}
                 className="h-8 gap-1.5 border-red-800/60 font-mono text-[10px] text-red-300 hover:bg-red-950/40">
                 {scanning ? <Loader2 className="size-3.5 animate-spin" /> : <Radar className="size-3.5" />}
@@ -391,7 +474,7 @@ export default function Home() {
             </div>
           </div>
           {/* mobil: dinamik görünüm yüksekliği (dvh) — adres çubuğu açılırken taşmaz */}
-          <div className="h-[56dvh] lg:h-auto lg:min-h-0 lg:flex-1">
+          <div className="relative h-[56dvh] lg:h-auto lg:min-h-0 lg:flex-1">
             <ImageViewer
               original={srcImg}
               processed={processed?.out ?? null}
@@ -410,7 +493,54 @@ export default function Home() {
               showBoxes={!!boxes && compareMode !== 'side'}
               anomalies={anomalies}
               showAnomalies={showAnomalies}
+              cropMode={cropMode}
+              cropRect={cropRect}
+              onCropRect={setCropRect}
             />
+            {/* kesme kontrol çubuğu — görüntüleyici üzerinde yüzer */}
+            {cropMode && cropRect && (
+              <div className="absolute inset-x-0 bottom-3 z-20 flex justify-center px-2">
+                <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-lg border border-amber-700/70 bg-black/90 px-2.5 py-2 backdrop-blur-sm">
+                  <span className="flex items-center gap-1 font-mono text-[10px] font-semibold tracking-wider text-amber-500">
+                    <Scissors className="size-3.5" /> KESME ALANI
+                  </span>
+                  {([['X', 'x'], ['Y', 'y'], ['G', 'w'], ['E', 'h']] as const).map(([lab, key]) => (
+                    <label key={key} className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                      {lab}
+                      <input
+                        type="number"
+                        className="h-7 w-16 rounded border border-border bg-card px-1.5 text-[11px] text-foreground"
+                        value={Math.round(cropRect[key])}
+                        onChange={(e) => {
+                          const v = Math.round(Number(e.target.value) || 0);
+                          if (!processed) return;
+                          const iw = processed.out.width;
+                          const ihh = processed.out.height;
+                          const r = { ...cropRect };
+                          if (key === 'x') r.x = Math.max(0, Math.min(iw - 8, v));
+                          if (key === 'y') r.y = Math.max(0, Math.min(ihh - 8, v));
+                          if (key === 'w') r.w = Math.max(8, Math.min(iw - r.x, v));
+                          if (key === 'h') r.h = Math.max(8, Math.min(ihh - r.y, v));
+                          setCropRect(r);
+                        }}
+                      />
+                    </label>
+                  ))}
+                  <Button size="sm" onClick={applyCrop}
+                    className="h-7 bg-emerald-600 px-2.5 font-mono text-[10px] font-bold text-black hover:bg-emerald-500">
+                    KES
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={undoCrop} disabled={!cropUndo}
+                    className="h-7 px-2.5 font-mono text-[10px]">
+                    GERİ AL
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={exitCrop}
+                    className="h-7 px-2.5 font-mono text-[10px] text-red-400 hover:text-red-300">
+                    İPTAL
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
