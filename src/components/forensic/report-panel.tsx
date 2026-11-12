@@ -215,7 +215,7 @@ export function ReportPanel({
       <p className="rounded-md border border-border bg-card/50 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
         Raporlar <span className="text-foreground/80">yalnızca PDF ve HTML</span> olarak, Isparta İl Emniyet
         Müdürlüğü Yalvaç İlçe Emniyet Müdürlüğü Olay Yeri İnceleme Grup Amirliği antetiyle kısa resmî
-        düzende üretilir; görüntüler, OCR ve AI bulguları gömülüdür. Resmî süreçlerde bulgular
+        düzende üretilir; görüntüler, OCR ve YZ bulguları gömülüdür. Resmî süreçlerde bulgular
         sertifikalı laboratuvar cihazlarıyla doğrulanmalıdır.
       </p>
     </div>

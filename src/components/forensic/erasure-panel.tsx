@@ -267,7 +267,7 @@ export function ErasurePanel({
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= 3) {
-        toast({ title: 'En fazla 3 varyant seçebilirsiniz', description: 'AI analiz için önce bir seçimi kaldırın.' });
+        toast({ title: 'En fazla 3 varyant seçebilirsiniz', description: 'YZ analizi için önce bir seçimi kaldırın.' });
         return prev;
       }
       return [...prev, id];
@@ -325,10 +325,10 @@ export function ErasurePanel({
       }>('/api/analyze', payload);
       setAiResult(json.result ?? null);
       setAiRaw(json.raw ?? '');
-      toast({ title: 'AI silme analizi tamamlandı' });
+      toast({ title: 'YZ silme analizi tamamlandı' });
     } catch (e) {
       toast({
-        title: 'AI analiz hatası',
+        title: 'YZ analiz hatası',
         description: (e as Error).message ?? 'Bilinmeyen hata',
         variant: 'destructive',
       });
@@ -385,7 +385,7 @@ export function ErasurePanel({
               {famFilter ? `${famFilter} VARYANTLARI — SKORA GÖRE` : 'EN İYİ 9 VARYANT — KALINTI GÖRÜNÜRLÜĞÜNE GÖRE'}
             </span>
             <Badge variant="outline" className="gap-1 border-emerald-800/60 font-mono text-[9px] text-emerald-400">
-              <MousePointerClick className="size-3" /> SEÇ = AI ANALİZ
+              <MousePointerClick className="size-3" /> SEÇ = YZ ANALİZ
             </Badge>
           </div>
           {/* teknik ailesi süzgeci — kimyasal silme artıkları tek tıkla görünür */}
@@ -423,7 +423,7 @@ export function ErasurePanel({
                     </div>
                   </div>
                   <button
-                    aria-label="AI seçimi"
+                    aria-label="YZ seçimi"
                     onClick={(e) => { e.stopPropagation(); toggleSelect(c.id); }}
                     className={`absolute right-1 top-1 grid size-5 place-items-center rounded-sm border font-mono text-[9px] ${
                       isSel
@@ -530,14 +530,14 @@ export function ErasurePanel({
             Uygulanan varyant görüntüleyicide açılır; ardından
             <span className="mx-1 font-mono text-violet-400">OCR</span>sekmesinde
             &quot;TÜM GÖRÜNTÜYÜ OKU&quot; ile makine okuması yapabilir veya
-            <span className="mx-1 font-mono text-violet-400">AI</span>sekmesinden adli analiz alabilirsiniz.
+            <span className="mx-1 font-mono text-violet-400">YZ</span>sekmesinden adli analiz alabilirsiniz.
           </p>
         </section>
       )}
 
       <div className="border-t border-border pt-3">
         <div className="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-widest text-emerald-500">
-          <BrainCircuit className="size-3.5" /> AI SİLME ANALİZİ
+          <BrainCircuit className="size-3.5" /> YZ SİLME ANALİZİ
           {selectedIds.length > 0 && (
             <span className="text-muted-foreground">({selectedIds.length} varyant seçili)</span>
           )}
@@ -545,11 +545,11 @@ export function ErasurePanel({
         <Button onClick={analyzeWithAi} disabled={aiLoading || !original || !candidates.length}
           className="h-11 w-full gap-2 bg-emerald-600 font-semibold text-black hover:bg-emerald-500">
           {aiLoading ? <LoaderCircle className="size-4 animate-spin" /> : <BrainCircuit className="size-5" />}
-          {aiLoading ? 'SİLME ANALİZİ…' : 'AI İLE SİLME TESPİTİ (SEÇİLİ VARYANTLAR)'}
+          {aiLoading ? 'SİLME ANALİZİ…' : 'YZ İLE SİLME TESPİTİ (SEÇİLİ VARYANTLAR)'}
         </Button>
         {!candidates.length && (
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Önce otomatik optimizasyonu çalıştırın — AI, üretilen en iyi varyantlarla birlikte
+            Önce otomatik optimizasyonu çalıştırın — YZ, üretilen en iyi varyantlarla birlikte
             silme izlerini değerlendirir ve silinen yazıyı tahmin etmeye çalışır.
           </p>
         )}

@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Camera, Upload, FlaskConical, Fingerprint, ScanText, BrainCircuit,
+  Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser,
 } from 'lucide-react';
@@ -29,7 +29,6 @@ import {
   type AnomalyRegion, type Params,
 } from '@/lib/forensic/pipeline';
 import { histogram, mixToGray, type Rect } from '@/lib/forensic/filters';
-import { generateDemoCase } from '@/lib/forensic/demo';
 import { dataUrlToImageData, imageDataToDataUrl, downloadDataUrl } from '@/lib/forensic/canvas';
 import { useCaseStore, paramsSummary } from '@/lib/forensic/store';
 
@@ -99,23 +98,6 @@ export default function Home() {
     },
     [loadFromDataUrl, toast]
   );
-
-  const loadDemo = useCallback(() => {
-    const demo = generateDemoCase();
-    setSrcImg(demo.imageData);
-    setImgName(demo.name);
-    setRegion(null);
-    setBoxes(null);
-    setAnomalies([]);
-    setCompareMode('single');
-    setParams(DEFAULT_PARAMS);
-    setRecoveryMode(false);
-    setLivePreview(null);
-    toast({
-      title: 'Örnek vaka yüklendi — TF-2024/117',
-      description: 'Kimyasal silme, gizli UV metni ve girinti yazısı içerir. Reçetelerle deneyin.',
-    });
-  }, [toast]);
 
   /* ---------------- yapıştırma (paste) ---------------- */
   useEffect(() => {
@@ -229,7 +211,7 @@ export default function Home() {
   const hudRight = livePreview
     ? 'CANLI İNCE AYAR · İYİLEŞTİRMELER GÖRÜNTÜLEYİCIDE ANLIK GÖRÜNÜR · UYGULA İLE KALICI OLUR'
     : recoveryMode
-      ? 'MOD: İNCELEME VARYANTI · RECOVERY STUDIO · TAM ÇÖZÜNÜRLÜK'
+      ? 'MOD: İNCELEME VARYANTI · KURTARMA ATÖLYESİ · TAM ÇÖZÜNÜRLÜK'
       : processed
         ? `MOD: ${band.name.toUpperCase()} (${band.nm}) · ${paramsSummary(params).toUpperCase()} · ${processed.ms.toFixed(0)}MS`
         : '';
@@ -248,11 +230,11 @@ export default function Home() {
         }}
       >
         <Header onCamera={() => setCameraOpen(true)} onUpload={() => fileInputRef.current?.click()}
-          onDemo={loadDemo} compact />
+          compact />
         <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-8 px-4 py-10">
           <div className="text-center">
             <div className="mb-3 flex items-center justify-center gap-2 font-mono text-[11px] tracking-[0.3em] text-amber-600">
-              <ShieldAlert className="size-4" /> FORENSIC DOCUMENT EXAMINATION CONSOLE
+              <ShieldAlert className="size-4" /> ADLİ BELGE İNCELEME KONSOLU
             </div>
             <img src="/logo.png" alt="İzSürücü logosu"
               className="mx-auto mb-4 size-24 rounded-2xl border border-border object-cover shadow-lg" />
@@ -283,9 +265,6 @@ export default function Home() {
               <Button onClick={() => fileInputRef.current?.click()} variant="outline" className="h-11 gap-2">
                 <Upload className="size-4" /> Dosya Yükle
               </Button>
-              <Button onClick={loadDemo} variant="outline" className="h-11 gap-2">
-                <FlaskConical className="size-4" /> Örnek Vaka
-              </Button>
             </div>
             <p className="font-mono text-[10px] text-muted-foreground/70">
               PANODAN GÖRSEL YAPIŞTIRMA DA DESTEKLENİR (CTRL+V)
@@ -300,10 +279,10 @@ export default function Home() {
               },
               {
                 icon: Contrast, title: 'Adli İşlem Hattı',
-                desc: 'CLAHE, Sauvola/Otsu eşikleme, eğik ışık girinti taraması, false-color yoğunluk haritaları.',
+                desc: 'CLAHE, Sauvola/Otsu eşikleme, eğik ışık girinti taraması, sahte renk yoğunluk haritaları.',
               },
               {
-                icon: BrainCircuit, title: 'OCR + AI Analiz',
+                icon: BrainCircuit, title: 'OCR + YZ Analizi',
                 desc: 'Türkçe/İngilizce metin okuma ve görme yeteneği olan modelle yapılandırılmış adli bulgu raporu.',
               },
             ].map((f) => (
@@ -345,7 +324,6 @@ export default function Home() {
       <Header
         onCamera={() => setCameraOpen(true)}
         onUpload={() => fileInputRef.current?.click()}
-        onDemo={loadDemo}
       />
 
       <main className="grid flex-1 grid-cols-1 gap-0 lg:flex-none lg:grid-cols-[minmax(0,1fr)_410px] lg:h-[calc(100vh_-_89px)] lg:overflow-hidden">
@@ -353,7 +331,7 @@ export default function Home() {
         <section className="flex flex-col border-b border-border lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Badge variant="outline" className="gap-1.5 border-amber-600/50 font-mono text-[10px] text-amber-500">
-              <Landmark className="size-3" /> {recoveryMode ? 'İnceleme Varyantı · RECOVERY' : `${band.name} · ${band.nm}`}
+              <Landmark className="size-3" /> {recoveryMode ? 'İnceleme Varyantı · KURTARMA' : `${band.name} · ${band.nm}`}
             </Badge>
             {processing && (
               <Badge variant="outline" className="gap-1 border-emerald-700/50 font-mono text-[10px] text-emerald-400">
@@ -431,7 +409,7 @@ export default function Home() {
               <TabsTrigger value="karalama" className="gap-1 px-1 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
               <TabsTrigger value="silme" className="gap-1 px-1 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
               <TabsTrigger value="ocr" className="gap-1 px-1 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
-              <TabsTrigger value="ai" className="gap-1 px-1 text-[10px] font-mono"><BrainCircuit className="size-3" />AI</TabsTrigger>
+              <TabsTrigger value="ai" className="gap-1 px-1 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
               <TabsTrigger value="rapor" className="gap-1 px-1 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
             </TabsList>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -493,11 +471,10 @@ export default function Home() {
 /* ---------------- ortak parçalar ---------------- */
 
 function Header({
-  onCamera, onUpload, onDemo, compact = false,
+  onCamera, onUpload, compact = false,
 }: {
   onCamera: () => void;
   onUpload: () => void;
-  onDemo: () => void;
   compact?: boolean;
 }) {
   const caseNo = useCaseStore((s) => s.caseNo);
@@ -531,9 +508,6 @@ function Header({
           <Button size="sm" variant="outline" onClick={onUpload} className="h-9 gap-1.5">
             <Upload className="size-4" /> Yükle
           </Button>
-          <Button size="sm" variant="ghost" onClick={onDemo} className="hidden h-9 gap-1.5 text-muted-foreground sm:inline-flex">
-            <FlaskConical className="size-4" /> Örnek Vaka
-          </Button>
         </div>
       </div>
     </header>
@@ -551,7 +525,7 @@ function Footer({ imageInfo, extra, className }: { imageInfo?: string; extra?: s
         {imageInfo && <span>GÖRÜNTÜ: {imageInfo.toUpperCase()}</span>}
         {extra && <span>{extra}</span>}
         <span className="ml-auto hidden sm:inline">
-          SANAL SPEKTRAL BANTLAR · TESSERACT OCR · AI ADLİ ANALİZ — EĞİTİM/ÖN İNCELEME AMAÇLI
+          SANAL SPEKTRAL BANTLAR · TESSERACT OCR · YZ ADLİ ANALİZ — EĞİTİM/ÖN İNCELEME AMAÇLI
         </span>
       </div>
     </footer>

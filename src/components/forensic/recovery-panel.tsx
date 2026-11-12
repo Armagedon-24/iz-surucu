@@ -243,7 +243,7 @@ export function RecoveryPanel({
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= 3) {
-        toast({ title: 'En fazla 3 varyant seçebilirsiniz', description: 'AI okuma için önce bir seçimi kaldırın.' });
+        toast({ title: 'En fazla 3 varyant seçebilirsiniz', description: 'YZ okuma için önce bir seçimi kaldırın.' });
         return prev;
       }
       return [...prev, id];
@@ -302,10 +302,10 @@ export function RecoveryPanel({
       }>('/api/analyze', payload);
       setAiResult(json.result ?? null);
       setAiRaw(json.raw ?? '');
-      toast({ title: 'AI okuma tamamlandı' });
+      toast({ title: 'YZ okuma tamamlandı' });
     } catch (e) {
       toast({
-        title: 'AI okuma hatası',
+        title: 'YZ okuma hatası',
         description: (e as Error).message ?? 'Bilinmeyen hata',
         variant: 'destructive',
       });
@@ -330,7 +330,7 @@ export function RecoveryPanel({
         taranır; en okunabilir varyantlar sıralanır. Daha isabetli sonuç için önce görüntüleyicide
         <span className="mx-1 font-mono text-emerald-400">OCR BÖLGE SEÇ</span> ile karalamayı
         seçin, sonra taramayı çalıştırın. Sonrasında <span className="font-medium text-foreground/85">NETLEŞTİR</span> gibi
-        hızlı ön ayarlarla görünümü netleştirin veya kaydırıcılarla elle kalibre edin. AI okuma,
+        hızlı ön ayarlarla görünümü netleştirin veya kaydırıcılarla elle kalibre edin. YZ okuma,
         yazı tam okunamasa bile görünüme dayalı <span className="font-medium text-foreground/85">mantıklı tahminler</span> de üretir.
       </div>
 
@@ -357,7 +357,7 @@ export function RecoveryPanel({
               EN İYİ 9 VARYANT — SKORA GÖRE
             </span>
             <Badge variant="outline" className="gap-1 border-emerald-800/60 font-mono text-[9px] text-emerald-400">
-              <MousePointerClick className="size-3" /> SEÇ = AI OKUMA
+              <MousePointerClick className="size-3" /> SEÇ = YZ OKUMA
             </Badge>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -380,7 +380,7 @@ export function RecoveryPanel({
                     </div>
                   </div>
                   <button
-                    aria-label="AI seçimi"
+                    aria-label="YZ seçimi"
                     onClick={(e) => { e.stopPropagation(); toggleSelect(c.id); }}
                     className={`absolute right-1 top-1 grid size-5 place-items-center rounded-sm border font-mono text-[9px] ${
                       isSel
@@ -487,14 +487,14 @@ export function RecoveryPanel({
             Uygulanan varyant görüntüleyicide açılır; ardından
             <span className="mx-1 font-mono text-amber-500">OCR</span>sekmesinde
             &quot;TÜM GÖRÜNTÜYÜ OKU&quot; ile makine okuması yapabilir veya
-            <span className="mx-1 font-mono text-amber-500">AI</span>sekmesinden adli analiz alabilirsiniz.
+            <span className="mx-1 font-mono text-amber-500">YZ</span>sekmesinden adli analiz alabilirsiniz.
           </p>
         </section>
       )}
 
       <div className="border-t border-border pt-3">
         <div className="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-widest text-emerald-500">
-          <BrainCircuit className="size-3.5" /> AI KARALAMA OKUMA
+          <BrainCircuit className="size-3.5" /> YZ KARALAMA OKUMA
           {selectedIds.length > 0 && (
             <span className="text-muted-foreground">({selectedIds.length} varyant seçili)</span>
           )}
@@ -502,11 +502,11 @@ export function RecoveryPanel({
         <Button onClick={readWithAi} disabled={aiLoading || !original || (!candidates.length && true)}
           className="h-11 w-full gap-2 bg-emerald-600 font-semibold text-black hover:bg-emerald-500">
           {aiLoading ? <LoaderCircle className="size-4 animate-spin" /> : <BrainCircuit className="size-5" />}
-          {aiLoading ? 'OKUMA REKONSTRÜKSİYONU…' : 'AI İLE OKU (SEÇİLİ VARYANTLAR)'}
+          {aiLoading ? 'OKUMA REKONSTRÜKSİYONU…' : 'YZ İLE OKU (SEÇİLİ VARYANTLAR)'}
         </Button>
         {!candidates.length && (
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Önce otomatik optimizasyonu çalıştırın — AI, üretilen en iyi varyantlarla birlikte okur.
+            Önce otomatik optimizasyonu çalıştırın — YZ, üretilen en iyi varyantlarla birlikte okur.
           </p>
         )}
       </div>

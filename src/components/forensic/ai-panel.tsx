@@ -95,10 +95,10 @@ export function AiPanel({
           raw: json.raw ?? '',
         });
       }
-      toast({ title: 'AI analizi tamamlandı' });
+      toast({ title: 'YZ analizi tamamlandı' });
     } catch (e) {
       toast({
-        title: 'AI analizi hatası',
+        title: 'YZ analizi hatası',
         description: (e as Error).message ?? 'Bilinmeyen hata',
         variant: 'destructive',
       });
@@ -134,7 +134,7 @@ export function AiPanel({
       <Button onClick={analyze} disabled={loading || !original}
         className="h-11 gap-2 bg-emerald-600 font-semibold text-black hover:bg-emerald-500">
         {loading ? <LoaderCircle className="size-4 animate-spin" /> : <BrainCircuit className="size-5" />}
-        {loading ? 'ANALİZ EDİLİYOR…' : 'AI ADLİ ANALİZ BAŞLAT'}
+        {loading ? 'ANALİZ EDİLİYOR…' : 'YZ ADLİ ANALİZ BAŞLAT'}
       </Button>
 
       {loading && (

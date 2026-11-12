@@ -270,7 +270,7 @@ export function ProcessPanel({
           </>
         )}
         <div className="mb-3">
-          <Label className="mb-1 block text-xs text-foreground/85">Yoğunluk renk haritası (false-color)</Label>
+          <Label className="mb-1 block text-xs text-foreground/85">Yoğunluk renk haritası (sahte renk)</Label>
           <Select value={params.falseColor} onValueChange={(v) => onChange({ falseColor: v as Params['falseColor'] })}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>

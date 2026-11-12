@@ -209,7 +209,7 @@ export function CameraCapture({ open, onOpenChange, onCapture }: CameraCapturePr
 
           {zoomRange && (
             <div className="flex items-center gap-3">
-              <span className="font-mono text-[10px] text-muted-foreground w-10">ZOOM</span>
+              <span className="font-mono text-[10px] text-muted-foreground shrink-0">YAKINLAŞTIRMA</span>
               <Slider
                 min={zoomRange[0]}
                 max={zoomRange[1]}

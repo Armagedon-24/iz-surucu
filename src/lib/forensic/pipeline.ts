@@ -297,7 +297,7 @@ export const PRESETS: Preset[] = [
     id: 'yogunluk',
     name: 'Yoğunluk Haritası',
     icon: 'thermometer',
-    desc: 'Ironbow false-color: mürekkep yoğunluğu ve baskı basıncı farklarını renkle gösterir.',
+    desc: 'Ironbow renk haritası: mürekkep yoğunluğu ve baskı basıncı farklarını renkle gösterir.',
     params: {
       band: 'white', falseColor: 'ironbow', claheOn: true, claheClip: 2,
       threshold: 'off', sobelOn: false, rakeOn: false, invertOn: false, heqOn: false,
