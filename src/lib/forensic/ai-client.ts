@@ -79,9 +79,56 @@ export function aiConfigStatus(): AiConfigStatus {
   };
 }
 
-/** Kullanılacak vision modeli — ZAI_MODEL ile geçersiz kılınabilir. */
+/**
+ * Kullanılacak vision modeli — ZAI_MODEL ile geçersiz kılınabilir.
+ *
+ * Varsayılan glm-4.6v-flash: vision (görüntü) sınıfından ve ücretsiz kademede.
+ * glm-5.3-flash gibi salt-metin modelleri vision isteğinde (image_url parçası)
+ * platform tarafından reddedilir — analiz istemcisi her zaman görüntü gönderir,
+ * bu yüzden varsayılan mutlaka V modelli olmalıdır.
+ */
 export function aiModel(): string {
-  return process.env.ZAI_MODEL?.trim() || 'glm-5.3-flash';
+  return process.env.ZAI_MODEL?.trim() || 'glm-4.6v-flash';
+}
+
+/**
+ * Upstream hata gövdesini iş koduna göre Türkçe tanıya çevirir (saf fonksiyon).
+ * z.ai hata biçimi: {"error":{"code":"1001","message":"..."}} — SDK mesajı
+ * "API request failed with status 401: <gövde>" olarak sarar.
+ * Kaynak: docs.z.ai/api-reference/api-code
+ */
+export function classifyUpstreamError(
+  raw: string,
+): { message: string; status: number } | null {
+  const body = raw.replace(/^.*?status \d+:\s*/, '').slice(0, 2000);
+  const codeMatch = body.match(/"code"\s*:\s*"?(\d{4})"?/);
+  const code = codeMatch?.[1] ?? '';
+  const text = body.replace(/\s+/g, ' ').slice(0, 300);
+  switch (code) {
+    case '1000':
+      return { message: 'Anahtar doğrulanamadı (kod 1000): ZAI_API_KEY yanlış, silinmiş veya bu taban adrese ait değil. z.ai → API Keys sayfasından güncel anahtarı kontrol edin.', status: 502 };
+    case '1001':
+      return { message: 'Anahtar isteğe ulaşmadı (kod 1001): ZAI_API_KEY değişkeninin adını ve değerini (baş/son boşluk, tırnak) kontrol edin; kaydettikten sonra Redeploy gerekir.', status: 502 };
+    case '1003':
+      return { message: 'Anahtarın süresi dolmuş (kod 1003): z.ai → API Keys sayfasından yeni anahtar üretip ortam değişkenini güncelleyin ve Redeploy yapın.', status: 502 };
+    case '1005':
+      return { message: 'Hesap iki aşamalı doğrulama istiyor (kod 1005): z.ai hesabınızda 2FA/telefon doğrulamasını tamamlayın.', status: 502 };
+    case '1113':
+      return { message: 'Hesap bakiyesi/paketi yetersiz (kod 1113): z.ai → Billing bölümünden bakiye yükleyin veya kaynak paketi ekleyin. (glm-4.6v-flash ücretsiz kademededir.)', status: 429 };
+    case '1211':
+      return { message: 'Model adı tanımsız (kod 1211): ZAI_MODEL değerini vision sınıfından bir modelle değiştirin (örn. glm-4.6v-flash).', status: 502 };
+    case '1311':
+      return { message: 'Abonelik planı bu modele erişim vermiyor (kod 1311): ZAI_MODEL olarak ücretsiz glm-4.6v-flash kullanın.', status: 502 };
+    case '1220':
+      return { message: 'Bu API çağrısına erişim izni yok (kod 1220): anahtarın kapsadığı servisi z.ai panelinden kontrol edin.', status: 503 };
+  }
+  if (/insufficient balance|bakiye|余额/i.test(text)) {
+    return { message: 'Hesap bakiyesi/paketi yetersiz: z.ai → Billing bölümünden bakiye yükleyin veya kaynak paketi ekleyin.', status: 429 };
+  }
+  if (/api key not found|invalid api key|invalid_api_key|authentication/i.test(text)) {
+    return { message: 'Anahtar geçersiz: ZAI_API_KEY değerini z.ai → API Keys sayfasından yeniden kopyalayın (boşluk/tırnak bırakmadan) ve Redeploy yapın.', status: 502 };
+  }
+  return null;
 }
 
 /**

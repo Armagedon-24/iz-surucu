@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { createAiClient, aiModel, classicVisionMode } from '@/lib/forensic/ai-client';
+import { createAiClient, aiModel, classicVisionMode, classifyUpstreamError } from '@/lib/forensic/ai-client';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -271,6 +271,20 @@ async function createVisionWithRetry(
 /** Ham SDK hatalarını kullanıcı dostu Türkçe mesajlara çevirir. */
 function friendlyError(e: unknown): { message: string; status: number } {
   const msg = (e as Error)?.message ?? 'Analiz sunucusunda beklenmeyen hata';
+  // 1) upstream gövdesindeki iş kodunu çöz (1000/1003/1113/1211/…) — en net tanı
+  if (/status \d{3}:/i.test(msg)) {
+    const tani = classifyUpstreamError(msg);
+    if (tani) return tani;
+  }
+  if (/Configuration file not found|kimlik bilgi/i.test(msg)) {
+    return {
+      message:
+        'AI servis kimlik bilgisi tanımlı değil. Vercel: Project Settings → Environment ' +
+        'Variables bölümüne ZAI_API_KEY ve ZAI_BASE_URL (veya ZAI_TABAN_URL) değişkenlerini ' +
+        'ekleyin, sonra Redeploy yapın. (Yerel geliştirmede .z-ai-config dosyası kullanılır.)',
+      status: 500,
+    };
+  }
   if (/401|X-Token|unauthorized|kimlik/i.test(msg)) {
     return {
       message:
@@ -289,15 +303,6 @@ function friendlyError(e: unknown): { message: string; status: number } {
     return {
       message: 'AI servisi zaman aşımına uğradı (görüntü çok büyük olabilir veya servis yoğun). Lütfen tekrar deneyin; genellikle ikinci deneme daha hızlı döner.',
       status: 504,
-    };
-  }
-  if (/Configuration file not found|kimlik bilgi/i.test(msg)) {
-    return {
-      message:
-        'AI servis kimlik bilgisi tanımlı değil. Vercel: Project Settings → Environment ' +
-        'Variables bölümüne ZAI_API_KEY ve ZAI_BASE_URL (veya ZAI_TABAN_URL) değişkenlerini ' +
-        'ekleyin, sonra Redeploy yapın. (Yerel geliştirmede .z-ai-config dosyası kullanılır.)',
-      status: 500,
     };
   }
   return { message: msg.slice(0, 200) || 'Analiz sunucusunda beklenmeyen hata', status: 500 };

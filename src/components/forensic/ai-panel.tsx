@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
-  BrainCircuit, LoaderCircle, Save, AlertTriangle, FileText,
+  BrainCircuit, LoaderCircle, Save, AlertTriangle, FileText, Stethoscope,
 } from 'lucide-react';
 import { imageDataToDataUrl } from '@/lib/forensic/canvas';
 import { postJsonSafe } from '@/lib/forensic/api';
@@ -107,6 +107,32 @@ export function AiPanel({
     }
   };
 
+  /** Bağlantı testi — /api/ai-health tek istekte tanı koyar (anahtar ifşa edilmez). */
+  const [testing, setTesting] = useState(false);
+  const [health, setHealth] = useState<{
+    ok: boolean; source: string; model: string; mode: string; host: string | null;
+    upstreamStatus?: number | null; upstreamKod?: string | null; upstreamDetay?: string | null; hint?: string;
+  } | null>(null);
+  const testConnection = async () => {
+    setTesting(true);
+    setHealth(null);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 25_000);
+      const res = await fetch('/api/ai-health', { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(timer);
+      setHealth((await res.json()) as NonNullable<typeof health>);
+    } catch (e) {
+      toast({
+        title: 'Bağlantı testi çalıştırılamadı',
+        description: (e as Error).message ?? 'Bilinmeyen hata',
+        variant: 'destructive',
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const sevBadge = (s?: string) => {
     const key = (s ?? '').toLowerCase();
     return SEV_COLORS[key] ?? 'secondary';
@@ -131,11 +157,40 @@ export function AiPanel({
         />
       </div>
 
-      <Button onClick={analyze} disabled={loading || !original}
-        className="h-11 gap-2 bg-emerald-600 font-semibold text-black hover:bg-emerald-500">
-        {loading ? <LoaderCircle className="size-4 animate-spin" /> : <BrainCircuit className="size-5" />}
-        {loading ? 'ANALİZ EDİLİYOR…' : 'YZ ADLİ ANALİZ BAŞLAT'}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button onClick={analyze} disabled={loading || !original}
+          className="h-11 flex-1 gap-2 bg-emerald-600 font-semibold text-black hover:bg-emerald-500">
+          {loading ? <LoaderCircle className="size-4 animate-spin" /> : <BrainCircuit className="size-5" />}
+          {loading ? 'ANALİZ EDİLİYOR…' : 'YZ ADLİ ANALİZ BAŞLAT'}
+        </Button>
+        <Button onClick={testConnection} disabled={testing} variant="outline"
+          className="h-11 gap-1.5 border-sky-800/60 font-mono text-[10px] text-sky-300 hover:bg-sky-950/40"
+          title="Anahtar, taban adres ve model zincirini 1-token'lık gerçek istekle sınar">
+          {testing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
+          TEST
+        </Button>
+      </div>
+
+      {health && (
+        <div className={`rounded-md border p-3 text-[12px] leading-relaxed ${health.ok
+          ? 'border-emerald-800/70 bg-emerald-950/25 text-emerald-200'
+          : 'border-red-800/70 bg-red-950/25 text-red-200'}`}>
+          <div className="mb-1 font-mono text-[10px] tracking-widest">
+            {health.ok ? 'BAĞLANTI SAĞLIKLI' : 'BAĞLANTI SORUNU'}
+            <span className="ml-2 text-muted-foreground">
+              kaynak: {health.source === 'env' ? 'ortam değişkeni' : health.source === 'file' ? 'yapılandırma dosyası' : 'yok'}
+              {' · '}model: {health.model}{' · '}uç: {health.mode}
+              {health.host ? ` · ${health.host}` : ''}
+              {health.upstreamStatus ? ` · upstream: ${health.upstreamStatus}` : ''}
+              {health.upstreamKod ? ` (kod ${health.upstreamKod})` : ''}
+            </span>
+          </div>
+          {health.upstreamDetay && (
+            <div className="mb-1 font-mono text-[10px] text-muted-foreground">detay: {health.upstreamDetay}</div>
+          )}
+          {health.hint && <div>{health.hint}</div>}
+        </div>
+      )}
 
       {loading && (
         <div className="relative overflow-hidden rounded-md border border-emerald-900/60 bg-black/40 p-4">
