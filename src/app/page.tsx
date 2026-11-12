@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
-  Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser,
+  Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
 } from 'lucide-react';
 import { ImageViewer, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
@@ -23,6 +23,7 @@ import { AiPanel } from '@/components/forensic/ai-panel';
 import { ReportPanel } from '@/components/forensic/report-panel';
 import { RecoveryPanel } from '@/components/forensic/recovery-panel';
 import { ErasurePanel } from '@/components/forensic/erasure-panel';
+import { DirectionPanel } from '@/components/forensic/direction-panel';
 import { CameraCapture } from '@/components/forensic/camera-modal';
 import {
   DEFAULT_PARAMS, getBand, processPipeline, scanAnomalies,
@@ -33,6 +34,18 @@ import { dataUrlToImageData, imageDataToDataUrl, downloadDataUrl } from '@/lib/f
 import { useCaseStore, paramsSummary } from '@/lib/forensic/store';
 
 const WORKING_MAX = 1800;
+
+/** Aktif sekmenin tek satırlık açıklaması — sekme çubuğunun altında gösterilir. */
+const TAB_HINTS: Record<string, string> = {
+  bant: 'UV/IR sanal ışık bantları ve adli reçeteler — inceleme ışığını seçin.',
+  islem: 'Ton, kontrast, eğik ışık ve eşikleme — görüntüyü netleştirin.',
+  yon: 'Çizgi yönü taraması — girinti ve karalama yapılarının yönünü bulun.',
+  karalama: 'Karalanmış yazının altını 26 teknikle ortaya çıkarır.',
+  silme: 'Kimyasal silme kalıntılarını görünür kılar.',
+  ocr: 'Metni makineyle okur — bölge seçerek isabeti artırın.',
+  ai: 'YZ adli analiz: bulgular, mürekkep farkları, silme şüphesi.',
+  rapor: 'Vaka bilgileri, anlık görüntüler ve resmî PDF rapor.',
+};
 
 type CompareMode = 'single' | 'split' | 'side';
 
@@ -57,6 +70,7 @@ export default function Home() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('bant');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const caseNo = useCaseStore((s) => s.caseNo);
@@ -402,22 +416,30 @@ export default function Home() {
 
         {/* kontrol paneli */}
         <aside className="flex min-h-0 flex-col">
-          <Tabs defaultValue="bant" className="flex h-full min-h-0 flex-col">
-            <TabsList className="mx-2 mt-2 grid w-auto shrink-0 grid-cols-7 bg-card/60">
-              <TabsTrigger value="bant" className="gap-1 px-1 text-[10px] font-mono"><Radar className="size-3" />BANT</TabsTrigger>
-              <TabsTrigger value="islem" className="gap-1 px-1 text-[10px] font-mono"><Contrast className="size-3" />İŞLEM</TabsTrigger>
-              <TabsTrigger value="karalama" className="gap-1 px-1 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
-              <TabsTrigger value="silme" className="gap-1 px-1 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
-              <TabsTrigger value="ocr" className="gap-1 px-1 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
-              <TabsTrigger value="ai" className="gap-1 px-1 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
-              <TabsTrigger value="rapor" className="gap-1 px-1 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
+          <Tabs defaultValue="bant" onValueChange={setActiveTab} className="flex h-full min-h-0 flex-col">
+            <TabsList className="mx-2 mt-2 flex w-auto shrink-0 overflow-x-auto rounded-lg bg-card/60 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <TabsTrigger value="bant" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><Radar className="size-3" />BANT</TabsTrigger>
+              <TabsTrigger value="islem" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><Contrast className="size-3" />İŞLEM</TabsTrigger>
+              <TabsTrigger value="yon" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Compass className="size-3" />YÖN</TabsTrigger>
+              <TabsTrigger value="karalama" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
+              <TabsTrigger value="silme" className="flex-none gap-1 px-2.5 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
+              <TabsTrigger value="ocr" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
+              <TabsTrigger value="ai" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
+              <TabsTrigger value="rapor" className="flex-none gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
             </TabsList>
+            <p className="mx-3 mt-1 shrink-0 truncate font-mono text-[9px] text-muted-foreground/80">
+              {TAB_HINTS[activeTab] ?? ''}
+            </p>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                 <TabsContent value="bant" className="mt-0">
                   <SpectralPanel params={params} onChange={changeParams} />
                 </TabsContent>
                 <TabsContent value="islem" className="mt-0">
                   <ProcessPanel params={params} onChange={changeParams} />
+                </TabsContent>
+                <TabsContent value="yon" className="mt-0">
+                  <DirectionPanel original={srcImg} onLivePreview={setLivePreview}
+                    onApplyLighting={(a) => changeParams({ rakeOn: true, rakeAngle: (90 - a + 360) % 360 })} />
                 </TabsContent>
                 <TabsContent value="karalama" className="mt-0">
                   <RecoveryPanel original={srcImg} region={region}

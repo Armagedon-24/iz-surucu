@@ -2,7 +2,7 @@
 
 /**
  * RAPOR & VAKA PANELİ — vaka bilgileri, anlık görüntü kayıtları,
- * HTML/metin rapor indirme ve çok bantlı dizi çekim (montaj).
+ * resmî PDF rapor indirme ve çok bantlı dizi çekim (montaj).
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Camera, FileDown, FileText, Layers3, Trash2, FolderPlus, LoaderCircle,
+  Camera, FileDown, Layers3, Trash2, FolderPlus, LoaderCircle,
 } from 'lucide-react';
 import {
   imageDataToDataUrl, downloadDataUrl,
@@ -21,7 +21,7 @@ import { renderMontage } from '@/lib/forensic/pipeline';
 import {
   useCaseStore, paramsSummary,
 } from '@/lib/forensic/store';
-import { buildHtmlReport, downloadBlob, type ReportData } from '@/lib/forensic/report';
+import { downloadBlob, type ReportData } from '@/lib/forensic/report';
 import { buildOfficialPdf } from '@/lib/forensic/pdf';
 import type { Params } from '@/lib/forensic/pipeline';
 import { getBand } from '@/lib/forensic/pipeline';
@@ -82,7 +82,7 @@ export function ReportPanel({
     }
   };
 
-  /** Hem PDF hem HTML raporunun ortak veri kaynağı */
+  /** PDF raporunun ortak veri kaynağı */
   const collectData = (): ReportData => ({
     caseNo,
     examiner,
@@ -100,19 +100,6 @@ export function ReportPanel({
       : undefined,
     imageInfo,
   });
-
-  const htmlReport = () => {
-    setBusy('html');
-    try {
-      const html = buildHtmlReport(collectData());
-      downloadBlob(html, `ADLI_RAPOR_${caseNo}.html`, 'text/html;charset=utf-8');
-      toast({ title: 'HTML rapor indirildi', description: 'Resmî antetli kısa düzen — yazdırılabilir A4' });
-    } catch (e) {
-      toast({ title: 'Rapor oluşturulamadı', description: (e as Error).message, variant: 'destructive' });
-    } finally {
-      setBusy('');
-    }
-  };
 
   const pdfReport = async () => {
     setBusy('pdf');
@@ -201,10 +188,7 @@ export function ReportPanel({
         <h3 className="mb-1 font-mono text-[11px] tracking-widest text-amber-600">RAPOR ÇIKTILARI — RESMÎ DÜZEN</h3>
         <Button onClick={pdfReport} disabled={busy === 'pdf'} className="h-11 gap-2 bg-emerald-700 font-semibold text-white hover:bg-emerald-600">
           {busy === 'pdf' ? <LoaderCircle className="size-4 animate-spin" /> : <FileDown className="size-4" />}
-          {busy === 'pdf' ? 'PDF HAZIRLANIYOR…' : 'PDF ADLİ RAPOR İNDİR'}
-        </Button>
-        <Button onClick={htmlReport} disabled={busy === 'html'} variant="outline" className="h-10 gap-2">
-          <FileText className="size-4" /> HTML ADLİ RAPOR İNDİR
+          {busy === 'pdf' ? 'PDF HAZIRLANIYOR…' : 'RESMÎ ADLİ RAPOR İNDİR (PDF)'}
         </Button>
         <Button onClick={() => { resetCase(); toast({ title: 'Yeni vaka açıldı', description: 'Kayıtlar temizlendi' }); }}
           variant="ghost" className="h-9 gap-2 text-red-400 hover:text-red-300">
@@ -213,7 +197,7 @@ export function ReportPanel({
       </section>
 
       <p className="rounded-md border border-border bg-card/50 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
-        Raporlar <span className="text-foreground/80">yalnızca PDF ve HTML</span> olarak, Isparta İl Emniyet
+        Raporlar <span className="text-foreground/80">yalnızca PDF</span> olarak, Isparta İl Emniyet
         Müdürlüğü Yalvaç İlçe Emniyet Müdürlüğü Olay Yeri İnceleme Grup Amirliği antetiyle kısa resmî
         düzende üretilir; görüntüler, OCR ve YZ bulguları gömülüdür. Resmî süreçlerde bulgular
         sertifikalı laboratuvar cihazlarıyla doğrulanmalıdır.
