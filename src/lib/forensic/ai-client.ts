@@ -125,6 +125,9 @@ export function classifyUpstreamError(
   if (/insufficient balance|bakiye|余额/i.test(text)) {
     return { message: 'Hesap bakiyesi/paketi yetersiz: z.ai → Billing bölümünden bakiye yükleyin veya kaynak paketi ekleyin.', status: 429 };
   }
+  if (/token expired|expired/i.test(text)) {
+    return { message: 'Anahtarın süresi dolmuş veya hatalı girilmiş (upstream: "token expired or incorrect"). z.ai → API Keys sayfasından geçerli anahtarı kopyalayıp ortam değişkenini güncelleyin ve Redeploy yapın.', status: 502 };
+  }
   if (/api key not found|invalid api key|invalid_api_key|authentication/i.test(text)) {
     return { message: 'Anahtar geçersiz: ZAI_API_KEY değerini z.ai → API Keys sayfasından yeniden kopyalayın (boşluk/tırnak bırakmadan) ve Redeploy yapın.', status: 502 };
   }
