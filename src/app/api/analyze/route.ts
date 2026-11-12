@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import sharp from 'sharp';
 import { createAiClient, aiModel, classicVisionMode } from '@/lib/forensic/ai-client';
 
 export const runtime = 'nodejs';
@@ -82,7 +83,11 @@ Yanıtın SADECE şu JSON şeması olmalı (başka hiçbir metin, markdown veya 
   "genel_degerlendirme": "2-4 cümle: hangi teknik neden işe yaradı, yazının durumu",
   "guven": 0-100 arası tam sayı,
   "oneriler": ["okunabilirliği artırmak için somut öneriler (ör. hangi ışıkta yeni çekim)"]
-}`;
+}
+
+SIKI UZUNLUK KURALLARI: kelime_guveni EN FAZLA 12 madde (yalnızca en kritik kelimeler),
+tahminler EN FAZLA 3 madde, oneriler EN FAZLA 2 kısa madde; "not" ve "gerekce" alanları
+tek cümleyi geçmesin. Toplam yanıt 350 kelimeyi geçmesin.`;
 
 const ERASURE_PROMPT = `Sen adli belge incelemede silme (eradikasyon) tespiti konusunda uzman bir
 modelsin. Yazıldıktan sonra silinen (silgi/mekanik, kimyasal çözücü, kazıma) yazıyı tespit etmek
@@ -117,20 +122,70 @@ Yanıtın SADECE şu JSON şeması olmalı (başka hiçbir metin, markdown veya 
   ],
   "genel_degerlendirme": "2-4 cümle: hangi teknik neden işe yaradı, silmenin durumu",
   "guven": 0-100 arası tam sayı,
-  "oneriler": ["okunabilirliği artırmak için somut öneriler (ör. eğik ışıkta yeni çekim)"]
-}`;
+  "oneriler": ["kısa madde"]
+}
+
+SIKI UZUNLUK KURALLARI: tahminler EN FAZLA 3, bulgular EN FAZLA 3, oneriler EN FAZLA 2
+kısa madde; "gerekce" tek cümleyi geçmesin. Toplam yanıt 300 kelimeyi geçmesin.`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Vision token sayısı megapiksel ile büyür — bu eşiği aşan görüntü küçültülür. */
+const MAX_IMAGE_PIXELS = 1_150_000; // ≈ 1024×1123
+const MAX_IMAGE_BYTES = 900_000;    // ≈ 0.9 MB ham JPEG — gereksiz büyük yükleri yeniden kodla
+
+function parseDataUrl(url: string): { mime: string; buffer: Buffer } | null {
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(url);
+  if (!m) return null;
+  try {
+    return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Önündeki ağ geçidi (preview proxy) uzun isteklerde zaman aşımına uğrayıp
- * HTML hata sayfası döndürebildiği için istek toplamda bu bütçe içinde
- * bitmelidir — bütçe aşılırsa JSON olarak 504 döner (asla HTML değil).
+ * Görseli AI çağrısı için normalize eder: megapiksel eşiğini aşan görüntüyü
+ * uzun kenardan 1150 piksele indirir, aşırı büyük JPEG'leri yeniden kodlar.
+ * Vision token'ı piksele bağlı olduğundan bu, gecikmeyi doğrudan düşürür;
+ * yazı izleri 1150 px'de korunur. Hata olursa orijinal geçirilir.
  */
-const TOTAL_BUDGET_MS = 24_000;
-const ATTEMPT_BUDGET_MS = 19_000;
+async function normalizeImage(url: string): Promise<{ url: string; resized: boolean }> {
+  const parsed = parseDataUrl(url);
+  if (!parsed) return { url, resized: false };
+  try {
+    const img = sharp(parsed.buffer, { failOn: 'none' });
+    const meta = await img.metadata();
+    const px = (meta.width ?? 0) * (meta.height ?? 0);
+    const tooBig = px > MAX_IMAGE_PIXELS || parsed.buffer.length > MAX_IMAGE_BYTES;
+    if (!tooBig) return { url, resized: false };
+    const out = await img
+      .resize({ width: 1150, height: 1150, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return { url: `data:image/jpeg;base64,${out.toString('base64')}`, resized: true };
+  } catch {
+    return { url, resized: false };
+  }
+}
+
+/**
+ * Önündeki ağ geçidi (preview proxy) çok uzun isteklerde zaman aşımına uğrayıp
+ * HTML hata sayfası döndürebildiği için istek bu bütçe içinde bitmelidir —
+ * bütçe aşılırsa JSON olarak 504 döner (asla HTML değil).
+ *
+ * Ölçümler (glm-5.3-flash, gateway): 1 görsel ≈ 4-5 sn, 2 görsel ≈ 20 sn,
+ * 4 görsel (1000px + 3×760px) prefill + üretim ≈ 25-45 sn sürdüğü için
+ * bütçe 19 sn'den 45 sn'ye çıkarıldı; istemci tarafı timeout 90 sn'dir.
+ * ANALYZE_TOTAL_BUDGET_MS ile geçersiz kılınabilir.
+ */
+const TOTAL_BUDGET_MS = Math.max(10_000, Number(process.env.ANALYZE_TOTAL_BUDGET_MS ?? 45_000));
+const ATTEMPT_BUDGET_MS = Math.min(
+  Math.max(8_000, Number(process.env.ANALYZE_ATTEMPT_BUDGET_MS ?? 40_000)),
+  TOTAL_BUDGET_MS - 3_000,
+);
 /** Yeniden deneme için kalan süre eşiği — vision çağrısı en az ~10 sn ister */
-const RETRY_MIN_REMAINING_MS = 12_000;
+const RETRY_MIN_REMAINING_MS = 22_000;
 
 function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -262,21 +317,28 @@ export async function POST(req: Request) {
     const extra = Array.isArray(processedList)
       ? processedList.filter((u) => typeof u === 'string' && u.startsWith('data:image')).slice(0, 3)
       : [];
-    const images = [original, ...(processed ? [processed] : []), ...extra];
+    const rawImages = [original, ...(processed ? [processed] : []), ...extra];
 
     // boyut koruması (yaklaşık)
-    if (images.some((u) => u.length > 4_000_000)) {
+    if (rawImages.some((u) => u.length > 4_000_000)) {
       return NextResponse.json(
         { ok: false, error: 'Görüntü verisi çok büyük. Daha düşük çözünürlükle deneyin.' },
         { status: 413 }
       );
     }
 
+    // vision token'ı piksele bağlı: büyük görüntüler küçültülür (gecikme kontrolü)
+    const norm = await Promise.all(rawImages.map(normalizeImage));
+    const images = norm.map((n) => n.url);
+    const resizedCount = norm.filter((n) => n.resized).length;
+    if (resizedCount > 0) console.error(`[analyze] ${resizedCount}/${images.length} görüntü küçültüldü`);
+
     const isRead = task === 'read';
     const isErasure = task === 'erasure';
     const system = isRead ? READ_PROMPT : isErasure ? ERASURE_PROMPT : SYSTEM_PROMPT;
-    // okuma/silme görevleri kelime güveni + tahmin listesi istediği için daha uzun üretime izin ver
-    const maxTokens = isRead ? 1700 : isErasure ? 1500 : 1100;
+    // üretim süresi bütçenin ana bileşeni: şemalar zaten kısa listeler istiyor;
+    // bu limitler yanıt kalitesini korurken gecikmeyi sınırlar
+    const maxTokens = isRead ? 1000 : isErasure ? 900 : 700;
 
     const userText = isRead || isErasure
       ? [
@@ -305,7 +367,12 @@ export async function POST(req: Request) {
           .filter(Boolean)
           .join('\n');
 
+    const t0 = Date.now();
     const completion = await createVisionWithRetry(system, userText, images, maxTokens);
+    console.error(
+      `[analyze] vision tamam: ${Math.round((Date.now() - t0) / 1000)} sn, ` +
+        `usage: ${JSON.stringify((completion as { usage?: unknown })?.usage ?? {})}`,
+    );
 
     const content: string =
       (completion?.choices?.[0]?.message?.content as string | undefined) ?? '';

@@ -398,7 +398,8 @@ export default function Home() {
               </Button>
             </div>
           </div>
-          <div className="h-[56vh] lg:h-auto lg:min-h-0 lg:flex-1">
+          {/* mobil: dinamik görünüm yüksekliği (dvh) — adres çubuğu açılırken taşmaz */}
+          <div className="h-[56dvh] lg:h-auto lg:min-h-0 lg:flex-1">
             <ImageViewer
               original={srcImg}
               processed={processed?.out ?? null}
@@ -501,8 +502,8 @@ function Header({
 }) {
   const caseNo = useCaseStore((s) => s.caseNo);
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
+    <header className="sticky top-0 z-30 border-b border-border bg-background/95 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] py-2.5">
         <div className="flex items-center gap-2.5">
           <img src="/logo.png" alt="İzSürücü" className="size-9 rounded-md border border-border object-cover" />
           <div>
@@ -541,8 +542,8 @@ function Header({
 
 function Footer({ imageInfo, extra, className }: { imageInfo?: string; extra?: string; className?: string }) {
   return (
-    <footer className={`border-t border-border bg-black/40 ${className ?? ''}`}>
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2 font-mono text-[10px] text-muted-foreground">
+    <footer className={`border-t border-border bg-black/40 pb-[env(safe-area-inset-bottom)] ${className ?? ''}`}>
+      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-5 gap-y-1 px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] py-2 font-mono text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500" />
           SİSTEM HAZIR

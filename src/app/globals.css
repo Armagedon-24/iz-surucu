@@ -150,3 +150,22 @@ html {
     @apply bg-background text-foreground;
   }
 }
+
+/* --- mobil / PWA dokunuş iyileştirmeleri --- */
+html {
+  /* sayfa kaydırırken lastik bant/pull-to-refresh bölge seçimini bozmasın */
+  overscroll-behavior-y: contain;
+}
+
+/* mobil tarayıcı dokunuş vurgusu ve çift dokunma yakınlaştırma gecikmesi */
+button, [role="button"], a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* PWA standalone modunda içerik alanının kaydırma zincirini kırma */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior: none;
+  }
+}

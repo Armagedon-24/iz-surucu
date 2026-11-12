@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { PwaRegister } from "@/components/pwa-register";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,6 +23,20 @@ export const metadata: Metadata = {
     "kızılötesi", "silme tespiti", "kimyasal tahrip", "CLAHE", "Sauvola",
   ],
   authors: [{ name: "İzSürücü" }],
+  manifest: "/manifest.webmanifest",
+  applicationName: "İzSürücü",
+  appleWebApp: {
+    capable: true,
+    title: "İzSürücü",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   openGraph: {
     title: "İzSürücü — Adli Belge İnceleme Konsolu",
     description:
@@ -34,6 +49,10 @@ export const viewport: Viewport = {
   themeColor: "#0a0c0a",
   width: "device-width",
   initialScale: 1,
+  // hassas bölge seçimi/kaydırma jestleri sayfa yakınlaştırmasıyla çakışmasın
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -48,6 +67,7 @@ export default function RootLayout({
       >
         {children}
         <Toaster />
+        <PwaRegister />
       </body>
     </html>
   );

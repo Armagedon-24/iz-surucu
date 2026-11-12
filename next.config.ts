@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
+  // sharp yerel modüldür — route içinde sunucu tarafı görüntü küçültme için kullanılır
+  serverExternalPackages: ["sharp"],
   typescript: {
     ignoreBuildErrors: true,
   },
