@@ -361,7 +361,7 @@ export function ImageViewer(props: ViewerProps) {
         mode: 'crop', handle,
         sx: px, sy: py, stx: tx, sty: ty,
         rx0: p.x, ry0: p.y,
-        cr: cropRect ? { ...cropRect } : null,
+        cr: cropRect ? { ...cropRect } : undefined,
       };
       if (handle === 'new') {
         onCropRect({ x: Math.max(0, p.x), y: Math.max(0, p.y), w: 0, h: 0 });

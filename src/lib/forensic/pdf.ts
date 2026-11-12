@@ -9,7 +9,6 @@
  * Yeri İnceleme Grup Amirliği antetli kısa resmî rapor düzeni
  * (buildReportContent ile HTML raporuyla aynı içerik modeli).
  */
-import { jsPDF } from 'jspdf';
 import { buildReportContent, HEADER_LINES, SECTIONS, type ReportData } from './report';
 
 interface Fonts {
@@ -70,6 +69,9 @@ const CONTENT_W = PAGE_W - M_LEFT - M_RIGHT;
 const FONT = 'DejaVu';
 
 export async function buildOfficialPdf(d: ReportData, deps: PdfDeps = {}): Promise<Blob> {
+  // jspdf yalnızca rapor indirilirken gerekir — başlangıç paketine girmesin
+  // (statik import ~370 KB'lık kütüphaneyi ana chunk'a taşıyordu)
+  const { jsPDF } = await import('jspdf');
   const fonts = deps.fonts ?? (await loadFonts());
   const imgSize = deps.imgSize ?? defaultImgSize;
   const c = buildReportContent(d);

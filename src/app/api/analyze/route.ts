@@ -301,10 +301,70 @@ function friendlyError(e: unknown): { message: string; status: number } {
   return { message: msg.slice(0, 200) || 'Analiz sunucusunda beklenmeyen hata', status: 500 };
 }
 
+/**
+ * HIZ SINIRI — bu uç herkese açık bir LLM vekilidir; kötüye kullanım (maliyet
+ * saldırısı) riskine karşı IP başına kayan pencere uygulanır. Bellek aşmaması
+ * için bayat anahtarlar toplu silinir. Dağıtımda ters vekil arkasında birden
+ * çok istemci aynı IP'de görünebilir; bu yüzden sınır cömert tutulur.
+ */
+const RATE_LIMIT_REQUESTS = 15;
+const RATE_WINDOW_MS = 180_000; // 3 dakika
+const MAX_BODY_BYTES = 18 * 1024 * 1024; // 5 görüntü × ~3.3 MB üst sınırı
+
+const rateMap = new Map<string, number[]>();
+
+function rateLimit(ip: string): { ok: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const hits = (rateMap.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (hits.length >= RATE_LIMIT_REQUESTS) {
+    rateMap.set(ip, hits);
+    const retryAfterSec = Math.ceil((RATE_WINDOW_MS - (now - hits[0])) / 1000);
+    return { ok: false, retryAfterSec };
+  }
+  hits.push(now);
+  rateMap.set(ip, hits);
+  if (rateMap.size > 5000) {
+    for (const [k, v] of rateMap) {
+      if (v.every((t) => now - t >= RATE_WINDOW_MS)) rateMap.delete(k);
+    }
+  }
+  return { ok: true, retryAfterSec: 0 };
+}
+
 export async function POST(req: Request) {
   try {
+    // gövde boyutu sınırı — JSON ayrıştırmadan ÖNCE reddet (DoS koruması)
+    const declared = Number(req.headers.get('content-length') ?? 0);
+    if (declared > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { ok: false, error: 'İstek gövdesi çok büyük (en fazla 18 MB).' },
+        { status: 413 }
+      );
+    }
+
+    // hız sınırı — önündeki vekil tek IP görebilir; x-forwarded-for'dan çöz
+    const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'local';
+    const rl = rateLimit(ip);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Çok fazla analiz isteği: 3 dakikada en fazla ${RATE_LIMIT_REQUESTS} istek. ${rl.retryAfterSec} sn sonra tekrar deneyin.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
+
     const body = (await req.json()) as AnalyzeBody;
-    const { original, processed, bandLabel, ocrText, question, task, processedList, variantLabels } = body;
+    const { original } = body;
+    // metin alanları sınırlanır: uzun serbest metin bellek/prompt maliyetini şişirir
+    const processed = typeof body.processed === 'string' ? body.processed.slice(0, 4_200_000) : undefined;
+    const bandLabel = typeof body.bandLabel === 'string' ? body.bandLabel.slice(0, 200) : undefined;
+    const ocrText = typeof body.ocrText === 'string' ? body.ocrText.slice(0, 8_000) : undefined;
+    const question = typeof body.question === 'string' ? body.question.slice(0, 2_000) : undefined;
+    const task: AnalyzeBody['task'] = ['forensic', 'read', 'erasure'].includes(body.task ?? '')
+      ? body.task
+      : 'forensic';
+    const variantLabels = Array.isArray(body.variantLabels)
+      ? body.variantLabels.filter((l) => typeof l === 'string').slice(0, 4)
+      : undefined;
 
     if (!original || typeof original !== 'string' || !original.startsWith('data:image')) {
       return NextResponse.json(
@@ -314,8 +374,11 @@ export async function POST(req: Request) {
     }
 
     // çoklu varyant (karalama okuma) veya tek işlenmiş görüntü
-    const extra = Array.isArray(processedList)
-      ? processedList.filter((u) => typeof u === 'string' && u.startsWith('data:image')).slice(0, 3)
+    const extra = Array.isArray(body.processedList)
+      ? (body.processedList as string[])
+          .filter((u) => typeof u === 'string' && u.startsWith('data:image'))
+          .slice(0, 3)
+          .map((u) => u.slice(0, 4_200_000))
       : [];
     const rawImages = [original, ...(processed ? [processed] : []), ...extra];
 

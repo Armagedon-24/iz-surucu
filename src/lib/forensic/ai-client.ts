@@ -47,8 +47,12 @@ function fileConfigValid(): boolean {
   ];
   for (const p of candidates) {
     try {
-      if (!fs.existsSync(p)) continue;
-      const c = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<ZAIConfig>;
+      // turbopackIgnore: çalışma zamanında çözülen yapılandırma dosyası —
+      // statik izleme tüm projeyi standalone çıktıya kopyalatıyordu (build hatası)
+      if (!fs.existsSync(/* turbopackIgnore: true */ p)) continue;
+      const c = JSON.parse(
+        fs.readFileSync(/* turbopackIgnore: true */ p, 'utf8')
+      ) as Partial<ZAIConfig>;
       if (c.baseUrl && c.apiKey) return true;
     } catch {
       /* okuma/parse hatası — sonraki adaya geç */
