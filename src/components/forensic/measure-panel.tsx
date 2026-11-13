@@ -15,7 +15,7 @@ import {
   Ruler, Undo2, Trash2, Download, Camera, CheckCircle2, Crosshair, MousePointerClick, X,
 } from 'lucide-react';
 import {
-  ANN_COLORS, KIND_LABELS, requiredPoints, dist, drawAnnotations,
+  ANN_COLORS, ANN_THICKNESS, KIND_LABELS, requiredPoints, dist, drawAnnotations,
   annotationsSummary, measureLabel, angleDeg,
   type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
@@ -32,6 +32,7 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
 
   const [tool, setTool] = useState<AnnKind>('ruler');
   const [color, setColor] = useState(ANN_COLORS[0]);
+  const [thickness, setThickness] = useState(1);
   const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [pxPerMm, setPxPerMm] = useState<number | null>(null);
@@ -67,9 +68,12 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     tmp.height = image.height;
     tmp.getContext('2d')!.putImageData(image, 0, 0);
     ctx.drawImage(tmp, 0, 0);
-    drawAnnotations(ctx, annotations, { ctx, scale: 1, pxPerMm });
+    drawAnnotations(ctx, annotations, {
+      ctx, scale: 1, pxPerMm,
+      imgW: image.width, imgH: image.height, thickness,
+    });
     return c;
-  }, [image, annotations, pxPerMm]);
+  }, [image, annotations, pxPerMm, thickness]);
 
   /* ana çizim — görüntü + anotasyonlar + canlı seçim */
   useEffect(() => {
@@ -86,12 +90,15 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
     const live = pending.length ? [...pending, hover ?? pending[pending.length - 1]] : undefined;
     try {
-      drawAnnotations(ctx, annotations, { ctx, scale, pxPerMm, livePts: live });
+      drawAnnotations(ctx, annotations, {
+        ctx, scale, pxPerMm, livePts: live,
+        imgW: image.width, imgH: image.height, thickness,
+      });
     } catch (err) {
       // tek bir bozuk kayıt paneli boşaltmasın — kanvas görüntüsü yerinde kalır
       console.error('Anotasyon çizimi hatası', err);
     }
-  }, [image, annotations, pending, hover, scale, pxPerMm, wrapW]);
+  }, [image, annotations, pending, hover, scale, pxPerMm, wrapW, thickness]);
 
   const toImageCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
@@ -259,6 +266,20 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
             className={`size-5 rounded-full border-2 transition-transform ${color === c ? 'scale-110 border-white' : 'border-transparent'}`}
             style={{ backgroundColor: c }} />
         ))}
+        <span className="ml-2 font-mono text-[9px] tracking-wider text-muted-foreground">KALINLIK:</span>
+        <div className="flex items-center gap-0.5">
+          {ANN_THICKNESS.map((t) => (
+            <button key={t.label} type="button"
+              onClick={() => setThickness(t.value)}
+              className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold transition-colors ${
+                thickness === t.value
+                  ? 'bg-indigo-500 text-black'
+                  : 'border border-indigo-900/60 text-indigo-200 hover:bg-indigo-950/40'
+              }`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
         {liveMeasure && (
           <span className="ml-auto font-mono text-[10px] text-indigo-300">CANLI: {liveMeasure}</span>
         )}

@@ -833,7 +833,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.6
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.7
             </div>
           </div>
         </div>
