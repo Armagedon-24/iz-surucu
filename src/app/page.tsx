@@ -34,6 +34,7 @@ import { VideoPanel, VideoStage, useVideoStudio } from '@/components/forensic/vi
 import { ComparePanel } from '@/components/forensic/compare-panel';
 import { EvidencePanel } from '@/components/forensic/evidence-panel';
 import { MeasurePanel } from '@/components/forensic/measure-panel';
+import { AnnotLiveSync } from '@/components/forensic/annot-live-sync';
 import { ExhibitBar } from '@/components/forensic/exhibit-bar';
 import { PdfPagePicker } from '@/components/forensic/pdf-page-picker';
 import { CameraCapture } from '@/components/forensic/camera-modal';
@@ -672,6 +673,8 @@ export default function Home() {
               cropRect={cropRect}
               onCropRect={setCropRect}
             />
+            {/* canlı işaretleme kaydı — sekmelerden bağımsız her değişimi yakalar (REV 9.10) */}
+            <AnnotLiveSync image={processed?.out ?? srcImg} />
             {/* kesme kontrol çubuğu — görüntüleyici üzerinde yüzer */}
             {cropMode && cropRect && (
               <div className="absolute inset-x-0 bottom-3 z-20 flex justify-center px-2">

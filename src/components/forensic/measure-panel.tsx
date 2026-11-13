@@ -20,12 +20,9 @@ import {
   hitAnnotation, moveAnnotationPoint, translateAnnotation,
   type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
-import { useCaseStore, LIVE_ANNOT_SNAPSHOT_ID } from '@/lib/forensic/store';
+import { useCaseStore } from '@/lib/forensic/store';
 
 const TOOLS: AnnKind[] = ['ruler', 'angle', 'arrow', 'circle', 'rect', 'text', 'calib'];
-
-/** Canlı işaretleme kaydının sabit kimliği — her işlemde güncellenir, kayıt çoğalmaz. */
-const LIVE_RECORD_ID = LIVE_ANNOT_SNAPSHOT_ID;
 
 export function MeasurePanel({ image }: { image: ImageData | null }) {
   const { toast } = useToast();
@@ -35,12 +32,13 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
   const pxPerMm = useCaseStore((s) => s.pxPerMm);
   const setPxPerMm = useCaseStore((s) => s.setPxPerMm);
   const addSnapshot = useCaseStore((s) => s.addSnapshot);
-  const upsertSnapshot = useCaseStore((s) => s.upsertSnapshot);
-  const removeSnapshot = useCaseStore((s) => s.removeSnapshot);
-
-  const [tool, setTool] = useState<AnnKind>('ruler');
-  const [color, setColor] = useState(ANN_COLORS[0]);
-  const [thickness, setThickness] = useState(1);
+  // Araç/renk/kalınlık depoda — büyük ekran paleti aynı ayarı paylaşır (REV 9.10)
+  const tool = useCaseStore((s) => s.annotTool);
+  const setTool = useCaseStore((s) => s.setAnnotTool);
+  const color = useCaseStore((s) => s.annotColor);
+  const setColor = useCaseStore((s) => s.setAnnotColor);
+  const thickness = useCaseStore((s) => s.annotThickness);
+  const setThickness = useCaseStore((s) => s.setAnnotThickness);
   const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,47 +90,11 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     return c;
   }, [image, annotations, pxPerMm, thickness]);
 
-  /** CANLI KAYIT (REV 9.8) — işaretleme listesinin son halini tam çözünürlükte
-   *  küçük resim olarak depoya işler: RAPOR → ANLIK GÖRÜNTÜ KAYITLARI'nda ve
-   *  PDF raporda her zaman güncel işaretli görünüm bulunur. Kayıt tek satır
-   *  (sabit kimlik) olarak güncellenir, liste çoğalmaz; listesi boşalınca silinir. */
-  const syncLiveRecord = useCallback((anns: Annotation[]) => {
-    if (!image) return;
-    if (!anns.length) {
-      removeSnapshot(LIVE_RECORD_ID);
-      return;
-    }
-    try {
-      const c = renderFull(anns);
-      if (!c) return;
-      const k = Math.min(1, 640 / Math.max(c.width, c.height));
-      const thumbC = document.createElement('canvas');
-      thumbC.width = Math.round(c.width * k);
-      thumbC.height = Math.round(c.height * k);
-      thumbC.getContext('2d')!.drawImage(c, 0, 0, thumbC.width, thumbC.height);
-      upsertSnapshot({
-        id: LIVE_RECORD_ID,
-        ts: Date.now(),
-        label: 'İşaretleme · Canlı',
-        thumb: thumbC.toDataURL('image/jpeg', 0.8),
-        modeName: 'ARAÇLAR · CANLI KAYIT',
-        modeNm: 'CANLI',
-        paramsSummary: annotationsSummary(anns, pxPerMm).slice(0, 120),
-      });
-    } catch (err) {
-      console.error('Canlı kayıt güncellenemedi', err);
-    }
-  }, [image, renderFull, pxPerMm, upsertSnapshot, removeSnapshot]);
-
-  /* CANLI KAYIT (REV 9.8/9.9) — işaretlemeler her değiştiğinde (panel çizimi,
-   * GERİ AL, büyük ekrandan sürükleme…) tam çözünürlüklü küçük resim 350 ms
-   * sonra depoya işlenir: sürükleme sırasında her karede yazılmaz, bitişte
-   * tek güncelleme düşer. RAPOR → ANLIK GÖRÜNTÜ KAYITLARI her zaman güncel. */
-  useEffect(() => {
-    if (!image) return;
-    const t = setTimeout(() => syncLiveRecord(annotations), 350);
-    return () => clearTimeout(t);
-  }, [image, annotations, syncLiveRecord]);
+  /* CANLI KAYIT (REV 9.10) — AnnotLiveSync bileşeni sayfa düzeyinde çalışır:
+   * hangi sekmedeyse, hangi ekrandan gelirse gelsin (panel çizimi, büyük ekran
+   * paleti, uç taşıma) her işaretleme değişimi 350 ms sonra tam çözünürlüklü
+   * küçük resim olarak canlı kayda işlenir. RAPOR → ANLIK GÖRÜNTÜ KAYITLARI
+   * her zaman güncel kalır. */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !image || !wrapW) return;
@@ -352,10 +314,10 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Bulguyu belge üzerine işaretleyin ve ölçün. Cetvel, adli cetvel bandı (siyah/beyaz
         bloklar) olarak çizilir; kalibrasyonla ölçüler santimetre + milimetre yazar.
-        Çizilen işaretlemelerin uçlarını sürükleyerek ayarlayabilir, gövdesinden
-        kaydırabilirsiniz — büyük ekranda TAŞIMA modu ile de olur. Her işlem, RAPOR
-        sekmesindeki ANLIK GÖRÜNTÜ KAYITLARI'ndaki canlı kayda otomatik işlenir;
-        işaretlemeler sekme değişiminde korunur.
+        Çizilen işaretlemelerin uçlarını buradan da, İNCELEME ekranındaki EKRANDA
+        İŞARETLE paletinden de çizebilir, taşıyabilir ve ölçülendirebilirsiniz —
+        araç/renk/kalınlık iki ekranda ortaktır. Her işlem, RAPOR sekmesindeki ANLIK
+        GÖRÜNTÜ KAYITLARI'ndaki canlı kayda otomatik işlenir; işaretlemeler korunur.
       </p>
 
       {/* araç seçimi */}

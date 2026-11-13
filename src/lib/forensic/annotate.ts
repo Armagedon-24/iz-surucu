@@ -21,6 +21,12 @@
  * (screenBase ile paneldekinden kalın); düzenleme modunda uçlarda ekranda sabit
  * boyutlu taşıma tutamaçları belirir ve hit-test ile uçlar/gövde sürüklenerek
  * ayarlanır. Kalibre ölçüler hem santimetre hem milimetre yazılır.
+ *
+ * BÜYÜK EKRAN EDİTÖRÜ (REV 9.10): çizim araçları ana görüntüleyicideki EKRANDA
+ * İŞARETLE paletinden de seçilir (depoda ortak annotTool/annotColor/annotThickness);
+ * tıklamalar doğrudan yeni işaretleme koyar, canlı önizleme livePts ile akar,
+ * ESC yarımda iptal eder. hitAnnotation/moveAnnotationPoint/translateAnnotation
+ * hem paneli hem büyük ekranı besler.
  */
 
 export type AnnKind = 'ruler' | 'angle' | 'arrow' | 'circle' | 'rect' | 'text' | 'calib';

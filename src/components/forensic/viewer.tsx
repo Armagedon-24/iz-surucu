@@ -4,18 +4,25 @@
  * GÖRÜNTÜLEYİCİ — adli inceleme ekranı.
  * Zoom/pan, split & side karşılaştırma, OCR bölge seçimi, anomali kaplamaları,
  * histogram HUD ve cihaz okumaları (mono HUD).
+ * REV 9.10 — büyük ekran işaretleme editörü: cetvel/ok/daire/açı/dikdörtgen/
+ * metin/kalibrasyon doğrudan büyük ekranda çizilir (EKRANDA İŞARETLE paleti),
+ * uçlardaki tutamaçlardan sürüklenerek düzeltilir, ölçü etiketi santimetre +
+ * milimetre yazar; araç/renk/kalınlık ARAÇLAR paneliyle ortaktır.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import {
-  Maximize2, Minus, Plus, SquareDashedMousePointer, ScanSearch, Move,
+  Maximize2, Minus, Plus, SquareDashedMousePointer, ScanSearch, Move, Undo2, X,
 } from 'lucide-react';
 import type { Rect } from '@/lib/forensic/filters';
 import type { AnomalyRegion } from '@/lib/forensic/pipeline';
-import type { Annotation } from '@/lib/forensic/annotate';
 import {
+  ANN_COLORS, ANN_THICKNESS, KIND_LABELS, requiredPoints, dist, mmLabel, angleDeg,
   drawAnnotations, hitAnnotation, moveAnnotationPoint, translateAnnotation,
+  type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
+import { useCaseStore } from '@/lib/forensic/store';
 
 export interface OcrBox {
   x0: number;
@@ -45,6 +52,10 @@ function handlePoints(r: CropRect): [number, number][] {
 }
 
 const HANDLE_NAMES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
+
+/** Büyük ekran işaretleme paleti (REV 9.10) — TAŞI + çizim araçları. */
+const V_TOOLS = ['move', 'ruler', 'angle', 'arrow', 'circle', 'rect', 'text', 'calib'] as const;
+type VTool = (typeof V_TOOLS)[number];
 
 /** Ekran pikseli verilen noktanın tutamaç/taşı/yeni seçim hit-testi. */
 function hitHandle(
@@ -143,14 +154,51 @@ export function ImageViewer(props: ViewerProps) {
     annot?: {
       annId: string;
       index: number; // -1 = tümünü taşı
+      kind: AnnKind;
       origPts: { x: number; y: number }[];
       start: { x: number; y: number };
     };
   }>({ mode: null, sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0 });
 
+  const { toast } = useToast();
+  // Depoda paylaşılan araç/renk/kalınlık — ARAÇLAR paneliyle aynı ayar (REV 9.10)
+  const annotTool = useCaseStore((s) => s.annotTool);
+  const setAnnotTool = useCaseStore((s) => s.setAnnotTool);
+  const annotColor = useCaseStore((s) => s.annotColor);
+  const setAnnotColor = useCaseStore((s) => s.setAnnotColor);
+  const annotThickness = useCaseStore((s) => s.annotThickness);
+  const setAnnotThickness = useCaseStore((s) => s.setAnnotThickness);
+  const addAudit = useCaseStore((s) => s.addAudit);
+  const setPxPerMm = useCaseStore((s) => s.setPxPerMm);
+
+  // Büyük ekran paleti — çizim aracı seçiliyken boş tıklamalar nokta koyar
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [vTool, setVTool] = useState<VTool>('move');
+  const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const drawing = paletteOpen && vTool !== 'move';
+
   const iw = processed?.width ?? original?.width ?? 1;
   const ih = processed?.height ?? original?.height ?? 1;
   const gap = 28;
+
+  /* ESC — büyük ekranda yarım kalan çizimi iptal eder */
+  useEffect(() => {
+    if (!pending.length) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPending([]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pending.length]);
+
+  /* yeni görüntüde yarım kalan çizimi bırak */
+  useEffect(() => { setPending([]); }, [iw, ih]);
+
+  /* palet açılınca depodaki aktif aracı öner (taşıma modundaysa TAŞI) */
+  useEffect(() => {
+    if (paletteOpen) setVTool(annotEdit ? 'move' : annotTool);
+  }, [paletteOpen, annotEdit, annotTool]);
 
   /* ---------- resimleri kanvaslara yaz ---------- */
   useEffect(() => {
@@ -293,19 +341,21 @@ export function ImageViewer(props: ViewerProps) {
       ctx.fillText(label, x + 2 + fs * 0.4, ly);
     }
 
-    /* ---------- işaretlemeler (REV 9.9) — ARAÇLAR'da çizilenler büyük ekranda ---------- */
-    if (annotations.length) {
+    /* ---------- işaretlemeler (REV 9.9/9.10) — çizilenler + canlı çizim önizlemesi ---------- */
+    if (annotations.length || pending.length) {
       try {
+        const live = pending.length ? [...pending, hover ?? pending[pending.length - 1]] : undefined;
         drawAnnotations(ctx, annotations, {
-          ctx, scale, pxPerMm,
-          imgW: iw, imgH: ih, screenBase: 5, handles: annotEdit,
+          ctx, scale, pxPerMm, livePts: live,
+          imgW: iw, imgH: ih, screenBase: 5,
+          thickness: annotThickness, handles: annotEdit || drawing,
         });
       } catch (err) {
         // bozuk kayıt büyük ekranı boşaltmasın
         console.error('İşaretleme çizimi hatası', err);
       }
     }
-  }, [boxes, showBoxes, anomalies, showAnomalies, region, cropMode, cropRect, scale, iw, ih, annotations, pxPerMm, annotEdit]);
+  }, [boxes, showBoxes, anomalies, showAnomalies, region, cropMode, cropRect, scale, iw, ih, annotations, pxPerMm, annotEdit, pending, hover, annotThickness, paletteOpen, vTool]);
 
   /* ---------- histogram HUD ---------- */
   useEffect(() => {
@@ -404,7 +454,54 @@ export function ImageViewer(props: ViewerProps) {
     }
   };
 
+  /** Palet araç seçimi — taşıma/çizim geçişi ve panelle eşzamanlama. */
+  const pickTool = (t: VTool) => {
+    setVTool(t);
+    setPending([]);
+    onSelectMode(false);
+    if (t === 'move') onAnnotEdit(true);
+    else {
+      onAnnotEdit(false);
+      setAnnotTool(t); // ARAÇLAR paneli aynı araca geçer
+    }
+  };
+
+  /** Büyük ekranda çizimi tamamlar — sorular ARAÇLAR panelindekiyle aynı. */
+  const commitAnnotation = (pts: { x: number; y: number }[], tool: AnnKind) => {
+    let ann: Annotation = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind: tool, pts, color: annotColor,
+    };
+    if (tool === 'text') {
+      const t = window.prompt('İşaretleme metni:', 'BULGU 1');
+      if (!t) return;
+      ann = { ...ann, text: t.slice(0, 120) };
+    }
+    if (tool === 'calib') {
+      const mm = window.prompt('Bu uzunluğun gerçek değeri kaç mm?', '100');
+      const v = Number(mm);
+      if (!mm || !v || v <= 0) return;
+      ann = { ...ann, mm: +v.toFixed(2) };
+      const d = dist(pts[0], pts[1]);
+      if (d > 0) {
+        setPxPerMm(d / v);
+        toast({ title: 'Ölçek kalibre edildi', description: `${d.toFixed(0)} px = ${v} mm → ${(d / v).toFixed(2)} px/mm. Cetvel artık santimetre + milimetre gösterir.` });
+      }
+    }
+    onAnnotationsChange([...annotations, ann]);
+    addAudit('İŞARETLEME', `${KIND_LABELS[tool]} büyük ekranda çizildi`);
+    setPending([]);
+  };
+
+  /** Büyük ekran GERİ AL — yarım noktayı ya da son işaretlemeyi siler. */
+  const undoBig = () => {
+    if (pending.length) { setPending((p) => p.slice(0, -1)); return; }
+    onAnnotationsChange(annotations.slice(0, -1));
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
+    // UI kontrolleri (palet, zoom, düğmeler) görüntü altına nokta/pan başlatmasın
+    if ((e.target as HTMLElement).closest?.('button, input, [data-ui="1"]')) return;
     // pinch-zoom: ikinci parmak inince sürükleme iptal, pinch tabanı kaydet
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
@@ -429,17 +526,31 @@ export function ImageViewer(props: ViewerProps) {
     // dokunmatikte parmak ucuna yumuşak tolerans, farede hassas tolerans
     const hitTol = coarseRef.current ? 30 : 16;
 
-    // TAŞIMA MODU (REV 9.9) — işaretleme ucuna/gövdesine yakın tık sürüklemeye dönüşür;
-    // boş alana tık normal pan/zoom olarak sürer
-    if (annotEdit) {
+    // İŞARETLEME ETKİLEŞİMİ (REV 9.9/9.10) — taşıma modunda veya çizim aracı
+    // açıkken varolan işaretlemenin ucuna/gövdesine yakın tık sürüklemeye dönüşür
+    // (uç: uzunluk/açı ayarı, gövde: kaydırma); çizim modunda boş alan nokta koyar,
+    // taşıma modunda boş alan normal pan olarak sürer
+    if (annotEdit || drawing) {
       const p = toImage(e.clientX, e.clientY);
       const hit = hitAnnotation(annotations, p, hitTol / scale);
       if (hit) {
         dragState.current = {
           mode: 'annot', sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0,
-          annot: { annId: hit.ann.id, index: hit.index, origPts: hit.ann.pts, start: p },
+          annot: { annId: hit.ann.id, index: hit.index, kind: hit.ann.kind, origPts: hit.ann.pts, start: p },
         };
         capturePointer(e);
+        return;
+      }
+      if (paletteOpen && vTool !== 'move') {
+        // BÜYÜK EKRANDA ÇİZİM (REV 9.10) — noktalar doğrudan belgeye konur
+        const tool: AnnKind = vTool;
+        const clamped = {
+          x: Math.max(0, Math.min(iw, Math.round(p.x))),
+          y: Math.max(0, Math.min(ih, Math.round(p.y))),
+        };
+        const next = [...pending, clamped];
+        if (next.length >= requiredPoints(tool)) commitAnnotation(next, tool);
+        else setPending(next);
         return;
       }
     }
@@ -489,7 +600,11 @@ export function ImageViewer(props: ViewerProps) {
       return;
     }
     const ds = dragState.current;
-    if (!ds.mode) return;
+    if (!ds.mode) {
+      // çizim önizlemesi — imleç son konulan noktaya canlı çizgi çeker
+      if (paletteOpen && vTool !== 'move') setHover(toImage(e.clientX, e.clientY));
+      return;
+    }
     const rect = containerRef.current!.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
@@ -570,14 +685,21 @@ export function ImageViewer(props: ViewerProps) {
   const onPointerUp = (e?: React.PointerEvent) => {
     pointers.current.delete(e?.pointerId ?? -1);
     if (pointers.current.size < 2) pinch.current = null;
-    if (dragState.current.mode === 'region') {
+    const ds = dragState.current;
+    if (ds.mode === 'region') {
       onSelectMode(false);
+    }
+    if (ds.mode === 'annot' && ds.annot) {
+      // büyük ekrandan taşıma denetim izi — ölçü etiketi sürükleme boyunca canlı aktı
+      addAudit('İŞARETLEME DÜZENLE', `${KIND_LABELS[ds.annot.kind]} ${ds.annot.index >= 0 ? 'ucu sürüklenerek' : 'gövdesinden kaydırılarak'} ayarlandı (büyük ekran)`);
     }
     dragState.current.mode = null;
     setPanning(false);
+    setHover(null);
   };
 
   const onDoubleClick = () => {
+    if (pending.length || drawing) return; // çizim sırasında iki hızlı tık zoom atlamasın
     if (Math.abs(scale - 1) < 0.05) fit();
     else {
       setScale(1);
@@ -600,6 +722,17 @@ export function ImageViewer(props: ViewerProps) {
 
   const dividerX = compareMode === 'split' ? tx + (comparePct / 100) * iw * scale : 0;
 
+  // Palet canlı ölçü okuması — cetvel/açı yarım çizimde cm+mm değerini gösterir
+  const liveMeasure = (() => {
+    const pts = hover && pending.length ? [...pending, hover] : pending;
+    if (vTool === 'ruler' && pts.length === 2) {
+      const px = dist(pts[0], pts[1]);
+      return pxPerMm ? mmLabel(px / pxPerMm) : `${px.toFixed(0)} px`;
+    }
+    if (vTool === 'angle' && pts.length === 3) return `${angleDeg(pts)}°`;
+    return null;
+  })();
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-black" ref={containerRef}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
@@ -608,7 +741,7 @@ export function ImageViewer(props: ViewerProps) {
       // sanıp pointercancel göndermesin (yoksa crop/pan/OCR bölgesi ölüyordu);
       // sayfa kaydırma görüntüleyici dışındaki alanlardan yapılır
       style={{
-        cursor: cropMode ? 'crosshair' : selectMode || annotEdit ? 'crosshair' : panning ? 'grabbing' : 'grab',
+        cursor: cropMode ? 'crosshair' : selectMode || annotEdit || drawing ? 'crosshair' : panning ? 'grabbing' : 'grab',
         touchAction: 'none',
       }}
       role="application" aria-label="Adli görüntü görüntüleyicisi"
@@ -699,12 +832,83 @@ export function ImageViewer(props: ViewerProps) {
             <Maximize2 className="size-4" />
           </Button>
         </div>
+        {/* BÜYÜK EKRAN İŞARETLEME EDİTÖRÜ (REV 9.10) — cetvel/ok/daire… doğrudan
+            büyük ekranda çizilir, uçlardan sürüklenerek düzeltilir; ölçü etiketi
+            cm + mm yazar. Panel ile araç/renk/kalınlık ortaktır. */}
+        <Button
+          size="sm"
+          variant={paletteOpen ? 'default' : 'outline'}
+          className={`h-9 gap-2 font-mono text-[11px] ${paletteOpen ? 'bg-amber-600 text-black hover:bg-amber-500' : 'bg-black/75 backdrop-blur-sm'}`}
+          onClick={() => { setPaletteOpen((v) => !v); setPending([]); }}
+        >
+          <Plus className="size-4" />
+          {paletteOpen ? 'ARAÇLARI KAPAT' : 'EKRANDA İŞARETLE'}
+        </Button>
+        {paletteOpen && (
+          <div data-ui="1" className="w-64 rounded-md border border-amber-700/70 bg-black/90 p-2 shadow-lg backdrop-blur-sm">
+            <div className="grid grid-cols-4 gap-1">
+              {V_TOOLS.map((t) => (
+                <button key={t} type="button" onClick={() => pickTool(t)}
+                  className={`h-7 rounded border font-mono text-[9px] font-semibold transition-colors ${
+                    vTool === t
+                      ? 'border-amber-500 bg-amber-600 text-black'
+                      : 'border-border bg-black/60 text-muted-foreground hover:text-foreground'
+                  }`}>
+                  {t === 'move' ? 'TAŞI' : KIND_LABELS[t]}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              {ANN_COLORS.map((c) => (
+                <button key={c} type="button" aria-label={`renk ${c}`} onClick={() => setAnnotColor(c)}
+                  className={`size-4 rounded-full border-2 transition-transform ${annotColor === c ? 'scale-110 border-white' : 'border-transparent'}`}
+                  style={{ backgroundColor: c }} />
+              ))}
+              <span className="ml-auto flex items-center gap-0.5">
+                {ANN_THICKNESS.map((t) => (
+                  <button key={t.label} type="button" onClick={() => setAnnotThickness(t.value)}
+                    className={`rounded px-1 py-0.5 font-mono text-[8px] font-semibold transition-colors ${
+                      annotThickness === t.value
+                        ? 'bg-amber-600 text-black'
+                        : 'border border-border text-muted-foreground hover:text-foreground'
+                    }`}>
+                    {t.label}
+                  </button>
+                ))}
+              </span>
+            </div>
+            {vTool !== 'move' ? (
+              <p className="mt-2 font-mono text-[9px] leading-relaxed text-amber-400">
+                {vTool === 'calib'
+                  ? 'Bilinen uzunluğun iki ucuna tıklayın; mm değeri sorulacak.'
+                  : `${pending.length}/${requiredPoints(vTool)} nokta — belge üzerine tıklayın.`}
+                {liveMeasure && ` CANLI: ${liveMeasure}`}
+              </p>
+            ) : (
+              <p className="mt-2 font-mono text-[9px] leading-relaxed text-amber-400">
+                TAŞI: beyaz tutamaçlardan ucu sürükleyin, gövdeden kaydırın.
+              </p>
+            )}
+            <div className="mt-2 flex items-center gap-1">
+              <button type="button" onClick={undoBig} disabled={!pending.length && !annotations.length}
+                className="flex h-6 flex-1 items-center justify-center gap-1 rounded border border-border bg-black/60 font-mono text-[9px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40">
+                <Undo2 className="size-3" /> GERİ AL
+              </button>
+              {pending.length > 0 && (
+                <button type="button" onClick={() => setPending([])}
+                  className="flex h-6 items-center justify-center gap-1 rounded border border-red-900/60 bg-black/60 px-2 font-mono text-[9px] text-red-400 transition-colors hover:text-red-300">
+                  <X className="size-3" /> VAZGEÇ
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {annotations.length > 0 && (
           <Button
             size="sm"
             variant={annotEdit ? 'default' : 'outline'}
             className={`h-9 gap-2 font-mono text-[11px] ${annotEdit ? 'bg-amber-600 text-black hover:bg-amber-500' : 'bg-black/75 backdrop-blur-sm'}`}
-            onClick={() => onAnnotEdit(!annotEdit)}
+            onClick={() => { setVTool('move'); setPending([]); onAnnotEdit(!annotEdit); }}
           >
             <Move className="size-4" />
             {annotEdit ? 'TAŞIMA MODU AÇIK' : 'İŞARETLEMELERİ DÜZENLE'}

@@ -4,7 +4,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Params } from '@/lib/forensic/pipeline';
-import type { Annotation } from '@/lib/forensic/annotate';
+import type { Annotation, AnnKind } from '@/lib/forensic/annotate';
+import { ANN_COLORS } from '@/lib/forensic/annotate';
 
 /** Denetim izi kaydı — zincirleme saklama ve resmî rapor için. */
 export interface AuditEntry {
@@ -54,8 +55,12 @@ interface CaseStore {
   analyses: AnalysisRecord[];
   ocrResults: OcrRecord[];
   audit: AuditEntry[]; // denetim izi — yapılan her işlem kronolojik
-  annotations: Annotation[]; // ölçüm/işaretleme — araçlar sekmesi
+  annotations: Annotation[]; // ölçüm/işaretleme — araçlar sekmesi + büyük ekran
   pxPerMm: number | null; // cetvel kalibrasyonu — mm ölçümleri için (kalıcı)
+  /** Aktif işaretleme aracı/renk/kalınlık — panel ile büyük ekran paleti ortak (REV 9.10). */
+  annotTool: AnnKind;
+  annotColor: string;
+  annotThickness: number; // İNCE 0.8 / NORMAL 1 / KALIN 1.5
   metaNotes: string[]; // üst veri (EXIF) özet notları — delil sekmesi
   aiDraft: string; // YZ rapor taslağı — rapor sekmesi
   setCaseNo: (v: string) => void;
@@ -72,6 +77,9 @@ interface CaseStore {
   clearAudit: () => void;
   setAnnotations: (a: Annotation[]) => void;
   setPxPerMm: (v: number | null) => void;
+  setAnnotTool: (t: AnnKind) => void;
+  setAnnotColor: (c: string) => void;
+  setAnnotThickness: (n: number) => void;
   setMetaNotes: (n: string[]) => void;
   setAiDraft: (t: string) => void;
   resetCase: () => void;
@@ -96,6 +104,9 @@ export const useCaseStore = create<CaseStore>()(
       audit: [],
       annotations: [],
       pxPerMm: null,
+      annotTool: 'ruler',
+      annotColor: ANN_COLORS[0],
+      annotThickness: 1,
       metaNotes: [],
       aiDraft: '',
       setCaseNo: (v) => set({ caseNo: v }),
@@ -123,6 +134,9 @@ export const useCaseStore = create<CaseStore>()(
       clearAudit: () => set({ audit: [] }),
       setAnnotations: (a) => set({ annotations: a.slice(0, 60) }),
       setPxPerMm: (v) => set({ pxPerMm: v }),
+      setAnnotTool: (t) => set({ annotTool: t }),
+      setAnnotColor: (c) => set({ annotColor: c }),
+      setAnnotThickness: (n) => set({ annotThickness: n }),
       setMetaNotes: (n) => set({ metaNotes: n.slice(0, 12) }),
       setAiDraft: (t) => set({ aiDraft: t.slice(0, 20000) }),
       resetCase: () =>
