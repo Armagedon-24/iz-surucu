@@ -15,7 +15,7 @@ import {
   Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
-  Scissors, Undo2, FlaskConical,
+  Scissors, Undo2, FlaskConical, Sparkles,
 } from 'lucide-react';
 import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
@@ -26,6 +26,7 @@ import { RecoveryPanel } from '@/components/forensic/recovery-panel';
 import { ErasurePanel } from '@/components/forensic/erasure-panel';
 import { LabPanel } from '@/components/forensic/lab-panel';
 import { DirectionPanel } from '@/components/forensic/direction-panel';
+import { EnhancementPanel } from '@/components/forensic/enhancement-panel';
 import { CameraCapture } from '@/components/forensic/camera-modal';
 import {
   DEFAULT_PARAMS, getBand, processPipeline, scanAnomalies,
@@ -45,6 +46,7 @@ const TAB_HINTS: Record<string, string> = {
   karalama: 'Karalanmış yazının altını 26 teknikle ortaya çıkarır.',
   silme: 'Kimyasal silme kalıntılarını görünür kılar.',
   lab: 'Gerçek laboratuvar teknikleri: UV florisans, IR lüminesans, ESDA girinti, CLAHE, kanal ayrıştırma.',
+  iyilestir: 'İyileştirme stüdyosu — fotoğraf/resim estetiği: pozlama, renk, gölge/ışık, detay; OTOMATİK İYİLEŞTİR tek tuşla dengeler.',
   ocr: 'Metni makineyle okur — bölge seçerek isabeti artırın.',
   ai: 'YZ adli analiz: bulgular, mürekkep farkları, silme şüphesi.',
   rapor: 'Vaka bilgileri, anlık görüntüler ve resmî PDF rapor.',
@@ -72,7 +74,7 @@ export default function Home() {
   const [scanning, setScanning] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [appliedMode, setAppliedMode] = useState<'' | 'recovery' | 'enhance'>('');
   const [activeTab, setActiveTab] = useState('bant');
   // inceleme varyantı kesme modu
   const [cropMode, setCropMode] = useState(false);
@@ -97,7 +99,7 @@ export default function Home() {
         setAnomalies([]);
         setCompareMode('single');
         setParams(DEFAULT_PARAMS);
-        setRecoveryMode(false);
+        setAppliedMode('');
         setLivePreview(null);
         setCropMode(false);
         setCropRect(null);
@@ -146,7 +148,7 @@ export default function Home() {
   /* ---------------- işlem hattı ---------------- */
   const runRef = useRef(0);
   useEffect(() => {
-    if (!srcImg || recoveryMode) return; // karalama inceleme varyantı aktifken pipeline çalışmaz
+    if (!srcImg || appliedMode) return; // uygulanan varyant aktifken (recovery/enhance) pipeline çalışmaz
     const id = ++runRef.current;
     const t = setTimeout(() => {
       setProcessing(true);
@@ -162,11 +164,11 @@ export default function Home() {
       });
     }, 40);
     return () => clearTimeout(t);
-  }, [srcImg, params, recoveryMode]);
+  }, [srcImg, params, appliedMode]);
 
   /* ---------------- karalama inceleme ---------------- */
   const changeParams = useCallback((p: Partial<Params>) => {
-    setRecoveryMode(false); // panel ayarı değişince varyant geçersiz
+    setAppliedMode(''); // panel ayarı değişince uygulanan varyant geçersiz
     setCropMode(false);
     setCropRect(null);
     setCropUndo(null);
@@ -176,12 +178,27 @@ export default function Home() {
   const handleApplyRecovery = useCallback((out: ImageData, _label: string) => {
     const g = mixToGray(out, [0.299, 0.587, 0.114]);
     setProcessed({ out, hist: histogram(g), ms: 0 });
-    setRecoveryMode(true);
+    setAppliedMode('recovery');
     setCropMode(false);
     setCropRect(null);
     setCropUndo(null);
     setLivePreview(null); // taahhüt edildi — canlı katmanı kapat, tam çözünürlüğü göster
   }, []);
+
+  /* ---------------- iyileştirme stüdyosu ---------------- */
+  const handleApplyEnhance = useCallback((out: ImageData, _label: string) => {
+    const g = mixToGray(out, [0.299, 0.587, 0.114]);
+    setProcessed({ out, hist: histogram(g), ms: 0 });
+    setAppliedMode('enhance');
+    setCropMode(false);
+    setCropRect(null);
+    setCropUndo(null);
+    setLivePreview(null);
+    toast({
+      title: 'İyileştirme uygulandı',
+      description: 'Sonuç ana görüntüde. Karşılaştırma modlarıyla önce/sonra inceleyebilir, araç çubuğundaki ↓ ile indirebilirsiniz.',
+    });
+  }, [toast]);
 
   /* ---------------- inceleme varyantı kesme ---------------- */
   const enterCrop = useCallback(() => {
@@ -271,7 +288,7 @@ export default function Home() {
       }
     }
     setSrcImg(out);
-    setRecoveryMode(false);
+    setAppliedMode('');
     setLivePreview(null);
     setCropMode(false);
     setCropRect(null);
@@ -295,11 +312,13 @@ export default function Home() {
     : '';
   const hudRight = livePreview
     ? 'CANLI İNCE AYAR · İYİLEŞTİRMELER GÖRÜNTÜLEYİCIDE ANLIK GÖRÜNÜR · UYGULA İLE KALICI OLUR'
-    : recoveryMode
+    : appliedMode === 'recovery'
       ? `MOD: İNCELEME VARYANTI · ${processed ? `${processed.out.width}×${processed.out.height} PX` : 'TAM ÇÖZÜNÜRLÜK'} · KURTARMA ATÖLYESİ`
-      : processed
-        ? `MOD: ${band.name.toUpperCase()} (${band.nm}) · ${paramsSummary(params).toUpperCase()} · ${processed.ms.toFixed(0)}MS`
-        : '';
+      : appliedMode === 'enhance'
+        ? `MOD: İYİLEŞTİRME STÜDYOSU · UYGULANMIŞ GÖRÜNTÜ · ${processed ? `${processed.out.width}×${processed.out.height} PX` : 'TAM ÇÖZÜNÜRLÜK'}`
+        : processed
+          ? `MOD: ${band.name.toUpperCase()} (${band.nm}) · ${paramsSummary(params).toUpperCase()} · ${processed.ms.toFixed(0)}MS`
+          : '';
 
   /* ================= BOŞ DURUM (LANDING) ================= */
   if (!srcImg) {
@@ -329,7 +348,9 @@ export default function Home() {
             <p className="mt-2 text-balance text-sm leading-relaxed text-muted-foreground sm:text-base">
               Belgenin fotoğrafını çekin; UV ve kızılötesi sanal bantlarla kimyasal silme ve
               tahrip izlerini görünür kılın, yerleşik OCR ile yazıyı okuyun, yapay zekâ adli
-              analiz raporu alın — kriminal laboratuvar iş akışı, tarayıcınızda.
+              analiz raporu alın — kriminal laboratuvar iş akışı, tarayıcınızda. İyileştirme
+              Stüdyosu ile fotoğraflarınızın pozlamasını, renklerini ve netliğini tek tuşla
+              düzeltin.
             </p>
           </div>
 
@@ -416,7 +437,7 @@ export default function Home() {
         <section className="flex flex-col border-b border-border lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Badge variant="outline" className="gap-1.5 border-amber-600/50 font-mono text-[10px] text-amber-500">
-              <Landmark className="size-3" /> {recoveryMode ? 'İnceleme Varyantı · KURTARMA' : `${band.name} · ${band.nm}`}
+              <Landmark className="size-3" /> {appliedMode === 'recovery' ? 'İnceleme Varyantı · KURTARMA' : appliedMode === 'enhance' ? 'İyileştirme Stüdyosu · UYGULANDI' : `${band.name} · ${band.nm}`}
             </Badge>
             {processing && (
               <Badge variant="outline" className="gap-1 border-emerald-700/50 font-mono text-[10px] text-emerald-400">
@@ -444,7 +465,7 @@ export default function Home() {
                   <Columns2 className="size-3.5" />
                 </Button>
               </div>
-              {recoveryMode && processed && (
+              {appliedMode && processed && (
                 <Button size="sm" variant={cropMode ? 'default' : 'outline'}
                   onClick={() => (cropMode ? exitCrop() : enterCrop())}
                   className={`h-8 gap-1.5 font-mono text-[10px] ${cropMode ? 'bg-amber-600 text-black hover:bg-amber-500' : 'border-sky-800/60 text-sky-300 hover:bg-sky-950/40'}`}>
@@ -452,7 +473,7 @@ export default function Home() {
                   {cropMode ? 'KESME MODU AÇIK' : 'GÖRÜNTÜYÜ KES'}
                 </Button>
               )}
-              {recoveryMode && processed && cropUndo && (
+              {appliedMode && processed && cropUndo && (
                 <Button size="sm" variant="outline" onClick={undoCrop}
                   className="h-8 gap-1.5 border-sky-800/60 font-mono text-[10px] text-sky-300 hover:bg-sky-950/40">
                   <Undo2 className="size-3.5" /> GERİ AL
@@ -558,6 +579,7 @@ export default function Home() {
               <TabsTrigger value="karalama" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
               <TabsTrigger value="silme" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
               <TabsTrigger value="lab" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-cyan-400"><FlaskConical className="size-3" />LAB</TabsTrigger>
+              <TabsTrigger value="iyilestir" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Sparkles className="size-3" />İYİLEŞTİR</TabsTrigger>
               <TabsTrigger value="ocr" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
               <TabsTrigger value="ai" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
               <TabsTrigger value="rapor" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
@@ -588,6 +610,10 @@ export default function Home() {
                 </TabsContent>
                 <TabsContent value="lab" className="mt-0">
                   <LabPanel original={srcImg} onApply={handleApplyRecovery}
+                    onLivePreview={setLivePreview} />
+                </TabsContent>
+                <TabsContent value="iyilestir" className="mt-0">
+                  <EnhancementPanel original={srcImg} onApply={handleApplyEnhance}
                     onLivePreview={setLivePreview} />
                 </TabsContent>
                 <TabsContent value="ocr" className="mt-0">
@@ -649,7 +675,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.2
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.3
             </div>
           </div>
         </div>
