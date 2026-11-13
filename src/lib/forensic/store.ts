@@ -24,6 +24,10 @@ export interface Snapshot {
   paramsSummary: string;
 }
 
+/** Otomatik canlı işaretleme kaydının sabit kimliği — her çizimde güncellenir,
+ *  yeni delil yüklenince silinir (bayat kayıt yanıltmasın). */
+export const LIVE_ANNOT_SNAPSHOT_ID = 'annot-live-auto';
+
 export interface AnalysisRecord {
   id: string;
   ts: number;
@@ -51,6 +55,7 @@ interface CaseStore {
   ocrResults: OcrRecord[];
   audit: AuditEntry[]; // denetim izi — yapılan her işlem kronolojik
   annotations: Annotation[]; // ölçüm/işaretleme — araçlar sekmesi
+  pxPerMm: number | null; // cetvel kalibrasyonu — mm ölçümleri için (kalıcı)
   metaNotes: string[]; // üst veri (EXIF) özet notları — delil sekmesi
   aiDraft: string; // YZ rapor taslağı — rapor sekmesi
   setCaseNo: (v: string) => void;
@@ -58,12 +63,15 @@ interface CaseStore {
   setAuthority: (v: string) => void;
   setNote: (v: string) => void;
   addSnapshot: (s: Snapshot) => void;
+  /** Aynı kimlikli kayıt varsa değiştirir, yoksa ekler — canlı işaretleme kaydı için. */
+  upsertSnapshot: (s: Snapshot) => void;
   removeSnapshot: (id: string) => void;
   addAnalysis: (a: AnalysisRecord) => void;
   addOcr: (o: OcrRecord) => void;
   addAudit: (action: string, detail?: string) => void;
   clearAudit: () => void;
   setAnnotations: (a: Annotation[]) => void;
+  setPxPerMm: (v: number | null) => void;
   setMetaNotes: (n: string[]) => void;
   setAiDraft: (t: string) => void;
   resetCase: () => void;
@@ -87,6 +95,7 @@ export const useCaseStore = create<CaseStore>()(
       ocrResults: [],
       audit: [],
       annotations: [],
+      pxPerMm: null,
       metaNotes: [],
       aiDraft: '',
       setCaseNo: (v) => set({ caseNo: v }),
@@ -94,6 +103,8 @@ export const useCaseStore = create<CaseStore>()(
       setAuthority: (v) => set({ authority: v }),
       setNote: (v) => set({ note: v }),
       addSnapshot: (s) => set((st) => ({ snapshots: [s, ...st.snapshots].slice(0, 16) })),
+      upsertSnapshot: (s) =>
+        set((st) => ({ snapshots: [s, ...st.snapshots.filter((x) => x.id !== s.id)].slice(0, 16) })),
       removeSnapshot: (id) => set((st) => ({ snapshots: st.snapshots.filter((x) => x.id !== id) })),
       addAnalysis: (a) => set((st) => ({ analyses: [a, ...st.analyses].slice(0, 12) })),
       addOcr: (o) => set((st) => ({ ocrResults: [o, ...st.ocrResults].slice(0, 12) })),
@@ -111,6 +122,7 @@ export const useCaseStore = create<CaseStore>()(
         })),
       clearAudit: () => set({ audit: [] }),
       setAnnotations: (a) => set({ annotations: a.slice(0, 60) }),
+      setPxPerMm: (v) => set({ pxPerMm: v }),
       setMetaNotes: (n) => set({ metaNotes: n.slice(0, 12) }),
       setAiDraft: (t) => set({ aiDraft: t.slice(0, 20000) }),
       resetCase: () =>
@@ -122,6 +134,7 @@ export const useCaseStore = create<CaseStore>()(
           ocrResults: [],
           audit: [],
           annotations: [],
+          pxPerMm: null,
           metaNotes: [],
           aiDraft: '',
         }),

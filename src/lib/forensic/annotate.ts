@@ -10,6 +10,12 @@
  * çözünürlük karede cetvel/ok net görünür. Tüm vurgular çift konturla çizilir
  * (beyaz/siyah alt çizgi + renkli çekirdek), etiketler koyu kapsül +
  * renkli çerçeve + beyaz yazıyla çizilir; her arka planda okunur.
+ *
+ * ADLİ CETVEL (REV 9.8): cetvel ölçümü artık düz çizgi değil, olay yeri
+ * fotoğraflarında kullanılan gerçek adli cetvel görünümündedir — ölçü
+ * çizgisi boyunca siyah/beyaz bloklardan ölçek bandı, dik uç kapamaları,
+ * (kalibre edildiyse) bloklarda cm numaraları ve seçilen renkte çerçeve.
+ * Böylece ölçü, raporda "adli cetvelle ölçülmüştür" algısı verir.
  */
 
 export type AnnKind = 'ruler' | 'angle' | 'arrow' | 'circle' | 'rect' | 'text' | 'calib';
@@ -212,6 +218,93 @@ function drawArrow(d: DrawCtx, a: { x: number; y: number }, b: { x: number; y: n
   ctx.restore();
 }
 
+/** ADLİ CETVEL (REV 9.8) — ölçü çizgisini gerçek adli cetvel bandına çevirir:
+ *  iki nokta arasında siyah/beyaz bloklardan ölçek şeridi (kalibre ise bloklar
+ *  tam 1 cm = 10 mm ve cm numaralı), dik uç kapamaları, seçilen renkte çerçeve,
+ *  uçlarda tutamaç noktaları ve bant üstünde ölçü etiketi. */
+function drawForensicRuler(d: DrawCtx, a: Annotation, u: number): void {
+  const { ctx } = d;
+  const [p0, p1] = a.pts;
+  const len = dist(p0, p1) || 1;
+  const ux = (p1.x - p0.x) / len;
+  const uy = (p1.y - p0.y) / len;
+  const nx = -uy;
+  const ny = ux;
+  const half = Math.max(u * 1.2, 3 / d.scale); // bant yarı kalınlığı
+  const bandQuad = (from: number, to: number) => () => {
+    ctx.beginPath();
+    ctx.moveTo(p0.x + ux * from + nx * half, p0.y + uy * from + ny * half);
+    ctx.lineTo(p0.x + ux * to + nx * half, p0.y + uy * to + ny * half);
+    ctx.lineTo(p0.x + ux * to - nx * half, p0.y + uy * to - ny * half);
+    ctx.lineTo(p0.x + ux * from - nx * half, p0.y + uy * from - ny * half);
+    ctx.closePath();
+  };
+  // 1) ölçek blokları — kalibre ise tam 1 cm, değilse çizgiye oranlı bölüm
+  const cmPx = d.pxPerMm ? d.pxPerMm * 10 : 0;
+  let seg = cmPx || Math.max(u * 3.2, len / 12);
+  const n = Math.max(1, Math.min(40, Math.round(len / seg)));
+  seg = len / n;
+  ctx.save();
+  bandQuad(0, len)();
+  ctx.clip();
+  for (let i = 0; i < n; i++) {
+    const s0 = i * seg;
+    const s1 = Math.min((i + 1) * seg, len);
+    ctx.fillStyle = i % 2 === 0 ? '#0b0b0d' : '#f5f5f2';
+    bandQuad(s0, s1)();
+    ctx.fill();
+  }
+  ctx.restore();
+  // 2) renkli çerçeve — kullanıcının seçtiği renk, kontrast alt konturla
+  strokeMarked(d, bandQuad(0, len), a.color, Math.max(1, u * 0.5));
+  // 3) cm numaraları — yalnız kalibre edildiyse ve bloklar yeterince genişse
+  if (cmPx && seg >= half * 1.8) {
+    const fs = Math.min(half * 1.15, seg * 0.42);
+    if (fs >= 6 / d.scale) {
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.font = `bold ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      for (let i = 0; i < n; i++) {
+        const sMid = (i + 0.5) * seg;
+        const cx = p0.x + ux * sMid;
+        const cy = p0.y + uy * sMid;
+        const onDark = i % 2 === 0;
+        ctx.lineWidth = Math.max(1, fs * 0.3);
+        ctx.strokeStyle = onDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)';
+        ctx.strokeText(String(i), cx, cy);
+        ctx.fillStyle = onDark ? '#ffffff' : '#0b0b0d';
+        ctx.fillText(String(i), cx, cy);
+      }
+      ctx.restore();
+    }
+  }
+  // 4) dik uç kapamaları — cetvelin sıfır ve son çizgisi
+  for (const s of [0, len]) {
+    const cx = p0.x + ux * s;
+    const cy = p0.y + uy * s;
+    strokeMarked(d, () => {
+      ctx.beginPath();
+      ctx.moveTo(cx - nx * (half + u * 0.9), cy - ny * (half + u * 0.9));
+      ctx.lineTo(cx + nx * (half + u * 0.9), cy + ny * (half + u * 0.9));
+    }, a.color, Math.max(1, u * 0.7));
+  }
+  // 5) tutamaç noktaları
+  drawDot(d, p0.x, p0.y, u * 0.9, a.color);
+  drawDot(d, p1.x, p1.y, u * 0.9, a.color);
+  // 6) ölçü etiketi — bant üstünde kapsül
+  const lab = measureLabel(a, d.pxPerMm);
+  if (lab) {
+    let lx = nx;
+    let ly = ny;
+    if (ly > 0) { lx = -lx; ly = -ly; } // etiket her zaman yukarı baksın
+    const off = half + u * 1.7;
+    drawLabel(d, lab, (p0.x + p1.x) / 2 + lx * off, (p0.y + p1.y) / 2 + ly * off, a.color, u);
+  }
+}
+
 /** Cetvel/kalibrasyon uçlarına dik kısa tik işaretleri — ölçü çizgisi algısını güçlendirir. */
 function drawTicks(d: DrawCtx, a: { x: number; y: number }, b: { x: number; y: number }, color: string, u: number): void {
   const { ctx } = d;
@@ -241,26 +334,7 @@ export function drawAnnotations(
     ctx.save();
     switch (a.kind) {
       case 'ruler': {
-        if (p.length === 2) {
-          strokeMarked(d, () => {
-            ctx.beginPath();
-            ctx.moveTo(p[0].x, p[0].y);
-            ctx.lineTo(p[1].x, p[1].y);
-          }, a.color, u);
-          drawTicks(d, p[0], p[1], a.color, u);
-          drawDot(d, p[0].x, p[0].y, u, a.color);
-          drawDot(d, p[1].x, p[1].y, u, a.color);
-          const lab = measureLabel(a, d.pxPerMm);
-          if (lab) {
-            // etiketi çizginin "üstüne" doğru normal yönünde kaydır
-            const len = dist(p[0], p[1]) || 1;
-            let nx = -(p[1].y - p[0].y) / len;
-            let ny = (p[1].x - p[0].x) / len;
-            if (ny > 0) { nx = -nx; ny = -ny; } // etiket her zaman yukarı baksın
-            const off = u * 2.4;
-            drawLabel(d, lab, (p[0].x + p[1].x) / 2 + nx * off, (p[0].y + p[1].y) / 2 + ny * off, a.color, u);
-          }
-        }
+        if (p.length === 2) drawForensicRuler(d, a, u);
         break;
       }
       case 'angle': {
@@ -350,6 +424,19 @@ export function drawAnnotations(
             ctx.moveTo(p[0].x, p[0].y);
             ctx.lineTo(p[1].x, p[1].y);
           }, a.color, u, dash);
+          // kalibrasyon bandı — adli cetvelin referans parçası gibi renkli ince şerit
+          strokeMarked(d, () => {
+            const len = dist(p[0], p[1]) || 1;
+            const nx = -((p[1].y - p[0].y) / len);
+            const ny = (p[1].x - p[0].x) / len;
+            const h = Math.max(u * 0.8, 2 / d.scale);
+            ctx.beginPath();
+            ctx.moveTo(p[0].x + nx * h, p[0].y + ny * h);
+            ctx.lineTo(p[1].x + nx * h, p[1].y + ny * h);
+            ctx.lineTo(p[1].x - nx * h, p[1].y - ny * h);
+            ctx.lineTo(p[0].x - nx * h, p[0].y - ny * h);
+            ctx.closePath();
+          }, a.color, Math.max(1, u * 0.35));
           drawTicks(d, p[0], p[1], a.color, u);
           for (const pt of p) drawDot(d, pt.x, pt.y, u * 0.9, a.color);
           const lab = measureLabel(a, d.pxPerMm);

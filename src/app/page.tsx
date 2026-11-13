@@ -43,7 +43,7 @@ import {
 } from '@/lib/forensic/pipeline';
 import { histogram, mixToGray, type Rect } from '@/lib/forensic/filters';
 import { dataUrlToImageData, imageDataToDataUrl, downloadDataUrl } from '@/lib/forensic/canvas';
-import { useCaseStore, paramsSummary } from '@/lib/forensic/store';
+import { useCaseStore, paramsSummary, LIVE_ANNOT_SNAPSHOT_ID } from '@/lib/forensic/store';
 import { sha256OfDataUrl } from '@/lib/forensic/hash';
 
 const WORKING_MAX = 1800;
@@ -161,6 +161,8 @@ export default function Home() {
   const ocrResults = useCaseStore((s) => s.ocrResults);
   const addAudit = useCaseStore((s) => s.addAudit);
   const setAnnotations = useCaseStore((s) => s.setAnnotations);
+  const setPxPerMm = useCaseStore((s) => s.setPxPerMm);
+  const removeSnapshot = useCaseStore((s) => s.removeSnapshot);
   const setMetaNotes = useCaseStore((s) => s.setMetaNotes);
   const band = getBand(params.band);
   const video = useVideoStudio(toast);
@@ -184,6 +186,8 @@ export default function Home() {
         setCropUndo(null);
         setSrcDataUrl(url);
         setAnnotations([]); // yeni delil — eski işaretlemeler geçersiz
+        setPxPerMm(null); // kalibrasyon belgeye özgüdür — yeni delilde sıfır
+        removeSnapshot(LIVE_ANNOT_SNAPSHOT_ID); // bayat canlı kayıt silinir
         setMetaNotes([]); // eski EXIF notları temiz
         setSrcSha('');
         setSrcBytes(0);
@@ -197,7 +201,7 @@ export default function Home() {
         toast({ title: 'Görüntü okunamadı', description: (e as Error).message, variant: 'destructive' });
       }
     },
-    [toast, addAudit, setAnnotations, setMetaNotes]
+    [toast, addAudit, setAnnotations, setPxPerMm, removeSnapshot, setMetaNotes]
   );
 
   const loadFile = useCallback(
@@ -833,7 +837,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.7
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.8
             </div>
           </div>
         </div>

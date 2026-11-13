@@ -5,7 +5,7 @@
  * resmî PDF rapor indirme, çok bantlı dizi çekim (montaj) ve YZ rapor
  * asistanı (bulguları resmî taslağa dönüştürür).
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -14,11 +14,12 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
   Camera, FileDown, Layers3, Trash2, FolderPlus, LoaderCircle,
-  BrainCircuit, Copy, Save,
+  BrainCircuit, Copy, Save, Activity,
 } from 'lucide-react';
 import {
   imageDataToDataUrl, downloadDataUrl,
 } from '@/lib/forensic/canvas';
+import { drawAnnotations, annotationsSummary } from '@/lib/forensic/annotate';
 import { renderMontage } from '@/lib/forensic/pipeline';
 import {
   useCaseStore, paramsSummary, formatAuditEntry,
@@ -27,6 +28,89 @@ import { downloadBlob, type ReportData } from '@/lib/forensic/report';
 import { buildOfficialPdf } from '@/lib/forensic/pdf';
 import type { Params } from '@/lib/forensic/pipeline';
 import { getBand } from '@/lib/forensic/pipeline';
+
+/** CANLI DÖŞEME (REV 9.8) — ANLIK GÖRÜNTÜ KAYITLARI'nın başında duran;
+ *  şu anki görüntüyü işaretlemelerle birlikte gerçek zamanlı yansıtan küçük
+ *  resim. Araçlar sekmesinde çizilen her cetvel/ok burada anında görünür;
+ *  KAYDET ile kalıcı kayda dönüşür. */
+function LiveTile({ processed }: { processed: ImageData | null }) {
+  const { toast } = useToast();
+  const annotations = useCaseStore((s) => s.annotations);
+  const pxPerMm = useCaseStore((s) => s.pxPerMm);
+  const addSnapshot = useCaseStore((s) => s.addSnapshot);
+  const addAudit = useCaseStore((s) => s.addAudit);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !processed) return;
+    canvas.width = processed.width;
+    canvas.height = processed.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.putImageData(processed, 0, 0);
+    try {
+      drawAnnotations(ctx, annotations, {
+        ctx, scale: 1, pxPerMm,
+        imgW: processed.width, imgH: processed.height,
+      });
+    } catch (err) {
+      console.error('Canlı döşeme çizim hatası', err);
+    }
+  }, [processed, annotations, pxPerMm]);
+
+  const save = () => {
+    if (!processed) return;
+    try {
+      const c = document.createElement('canvas');
+      c.width = processed.width;
+      c.height = processed.height;
+      const ctx = c.getContext('2d')!;
+      ctx.putImageData(processed, 0, 0);
+      drawAnnotations(ctx, annotations, {
+        ctx, scale: 1, pxPerMm,
+        imgW: c.width, imgH: c.height,
+      });
+      const k = Math.min(1, 640 / Math.max(c.width, c.height));
+      const t = document.createElement('canvas');
+      t.width = Math.round(c.width * k);
+      t.height = Math.round(c.height * k);
+      t.getContext('2d')!.drawImage(c, 0, 0, t.width, t.height);
+      addSnapshot({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        ts: Date.now(),
+        label: 'Canlı görünüm kaydı',
+        thumb: t.toDataURL('image/jpeg', 0.8),
+        modeName: 'CANLI GÖRÜNÜM',
+        modeNm: '—',
+        paramsSummary: annotationsSummary(annotations, pxPerMm).slice(0, 120),
+      });
+      addAudit('CANLI GÖRÜNÜM KAYDEDİLDİ', annotationsSummary(annotations, pxPerMm));
+      toast({ title: 'Canlı görünüm kaydedildi', description: 'ANLIK GÖRÜNTÜ KAYITLARI listesine eklendi.' });
+    } catch (e) {
+      toast({ title: 'Kaydedilemedi', description: (e as Error).message, variant: 'destructive' });
+    }
+  };
+
+  if (!processed) return null;
+  return (
+    <figure className="group relative overflow-hidden rounded-md border border-amber-700/60 bg-black/50 ring-1 ring-amber-600/20">
+      <div className="absolute left-1 top-1 z-10 flex items-center gap-1 rounded bg-amber-600 px-1.5 py-0.5 font-mono text-[8px] font-bold tracking-wider text-black">
+        <Activity className="size-2.5" /> CANLI
+      </div>
+      <canvas ref={canvasRef} className="w-full" />
+      <figcaption className="flex items-center justify-between gap-2 p-1.5">
+        <span className="min-w-0 truncate font-mono text-[9px] leading-tight text-muted-foreground">
+          Şu anki görünüm · işaretlemeler canlı işlenir
+        </span>
+        <Button size="sm" onClick={save}
+          className="h-6 shrink-0 gap-1 bg-amber-600 px-2 font-mono text-[9px] font-semibold text-black hover:bg-amber-500">
+          <Camera className="size-3" /> KAYDET
+        </Button>
+      </figcaption>
+    </figure>
+  );
+}
 
 export function ReportPanel({
   processed,
@@ -240,8 +324,9 @@ export function ReportPanel({
             </Button>
           </div>
         </div>
-        {snapshots.length ? (
+        {snapshots.length || processed ? (
           <div className="grid max-h-96 grid-cols-2 gap-2 overflow-y-auto pr-1">
+            <LiveTile processed={processed} />
             {snapshots.map((s) => (
               <figure key={s.id} className="group relative overflow-hidden rounded-md border border-border bg-black/50">
                 <img src={s.thumb} alt={`${s.modeName} anlık görüntü`} className="w-full" />
@@ -259,7 +344,8 @@ export function ReportPanel({
         ) : (
           <p className="text-[12px] leading-relaxed text-muted-foreground">
             Farklı bantlarda inceleme yaparken <span className="text-amber-500">Anlık Görüntü Al</span> ile
-            kayıt bırakın; kayıtlar rapora gömülür. (Tarayıcı kapanınca da saklanır.)
+            kayıt bırakın; Araçlar sekmesindeki işaretlemeler CANLI döşemeye ve kayıtlara
+            otomatik işlenir. (Tarayıcı kapanınca da saklanır.)
           </p>
         )}
       </section>

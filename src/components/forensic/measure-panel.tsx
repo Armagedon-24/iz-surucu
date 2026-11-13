@@ -19,23 +19,29 @@ import {
   annotationsSummary, measureLabel, angleDeg,
   type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
-import { useCaseStore } from '@/lib/forensic/store';
+import { useCaseStore, LIVE_ANNOT_SNAPSHOT_ID } from '@/lib/forensic/store';
 
 const TOOLS: AnnKind[] = ['ruler', 'angle', 'arrow', 'circle', 'rect', 'text', 'calib'];
+
+/** Canlı işaretleme kaydının sabit kimliği — her işlemde güncellenir, kayıt çoğalmaz. */
+const LIVE_RECORD_ID = LIVE_ANNOT_SNAPSHOT_ID;
 
 export function MeasurePanel({ image }: { image: ImageData | null }) {
   const { toast } = useToast();
   const addAudit = useCaseStore((s) => s.addAudit);
   const annotations = useCaseStore((s) => s.annotations);
   const setAnnotations = useCaseStore((s) => s.setAnnotations);
+  const pxPerMm = useCaseStore((s) => s.pxPerMm);
+  const setPxPerMm = useCaseStore((s) => s.setPxPerMm);
   const addSnapshot = useCaseStore((s) => s.addSnapshot);
+  const upsertSnapshot = useCaseStore((s) => s.upsertSnapshot);
+  const removeSnapshot = useCaseStore((s) => s.removeSnapshot);
 
   const [tool, setTool] = useState<AnnKind>('ruler');
   const [color, setColor] = useState(ANN_COLORS[0]);
   const [thickness, setThickness] = useState(1);
   const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
-  const [pxPerMm, setPxPerMm] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -56,8 +62,8 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     return Math.min(1, wrapW / image.width);
   }, [image, wrapW]);
 
-  /** Tam çözünürlükte anotasyonlu kanvas üretir (indirme/rapor için). */
-  const renderFull = useCallback((): HTMLCanvasElement | null => {
+  /** Tam çözünürlükte anotasyonlu kanvas üretir (indirme/rapor/canlı kayıt için). */
+  const renderFull = useCallback((anns: Annotation[] = annotations): HTMLCanvasElement | null => {
     if (!image) return null;
     const c = document.createElement('canvas');
     c.width = image.width;
@@ -68,12 +74,44 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     tmp.height = image.height;
     tmp.getContext('2d')!.putImageData(image, 0, 0);
     ctx.drawImage(tmp, 0, 0);
-    drawAnnotations(ctx, annotations, {
+    drawAnnotations(ctx, anns, {
       ctx, scale: 1, pxPerMm,
       imgW: image.width, imgH: image.height, thickness,
     });
     return c;
   }, [image, annotations, pxPerMm, thickness]);
+
+  /** CANLI KAYIT (REV 9.8) — işaretleme listesinin son halini tam çözünürlükte
+   *  küçük resim olarak depoya işler: RAPOR → ANLIK GÖRÜNTÜ KAYITLARI'nda ve
+   *  PDF raporda her zaman güncel işaretli görünüm bulunur. Kayıt tek satır
+   *  (sabit kimlik) olarak güncellenir, liste çoğalmaz; listesi boşalınca silinir. */
+  const syncLiveRecord = useCallback((anns: Annotation[]) => {
+    if (!image) return;
+    if (!anns.length) {
+      removeSnapshot(LIVE_RECORD_ID);
+      return;
+    }
+    try {
+      const c = renderFull(anns);
+      if (!c) return;
+      const k = Math.min(1, 640 / Math.max(c.width, c.height));
+      const thumbC = document.createElement('canvas');
+      thumbC.width = Math.round(c.width * k);
+      thumbC.height = Math.round(c.height * k);
+      thumbC.getContext('2d')!.drawImage(c, 0, 0, thumbC.width, thumbC.height);
+      upsertSnapshot({
+        id: LIVE_RECORD_ID,
+        ts: Date.now(),
+        label: 'İşaretleme · Canlı',
+        thumb: thumbC.toDataURL('image/jpeg', 0.8),
+        modeName: 'ARAÇLAR · CANLI KAYIT',
+        modeNm: 'CANLI',
+        paramsSummary: annotationsSummary(anns, pxPerMm).slice(0, 120),
+      });
+    } catch (err) {
+      console.error('Canlı kayıt güncellenemedi', err);
+    }
+  }, [image, renderFull, pxPerMm, upsertSnapshot, removeSnapshot]);
 
   /* ana çizim — görüntü + anotasyonlar + canlı seçim */
   useEffect(() => {
@@ -129,8 +167,10 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         toast({ title: 'Ölçek kalibre edildi', description: `${d.toFixed(0)} px = ${v} mm → ${(d / v).toFixed(2)} px/mm. Cetvel artık mm gösterir.` });
       }
     }
-    setAnnotations([...annotations, ann]);
+    const next = [...annotations, ann];
+    setAnnotations(next);
     setPending([]);
+    syncLiveRecord(next); // canlı kayıt — RAPOR küçük resimlerine anında işlenir
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -144,10 +184,16 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
 
   const undo = () => {
     if (pending.length) { setPending((p) => p.slice(0, -1)); return; }
-    setAnnotations(annotations.slice(0, -1));
+    const next = annotations.slice(0, -1);
+    setAnnotations(next);
+    syncLiveRecord(next);
   };
 
-  const clearAll = () => { setPending([]); setAnnotations([]); };
+  const clearAll = () => {
+    setPending([]);
+    setAnnotations([]);
+    syncLiveRecord([]);
+  };
 
   const download = () => {
     setBusy(true);
@@ -244,8 +290,10 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
       </div>
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Bulguyu belge üzerine işaretleyin ve ölçün. Cetvel kalibrasyonu ile ölçümler milimetre
-        cinsinden rapora işlenir. İşaretlemeler sekme değişiminde korunur.
+        Bulguyu belge üzerine işaretleyin ve ölçün. Cetvel, adli cetvel bandı (siyah/beyaz
+        bloklar) olarak çizilir; kalibrasyonla ölçüler milimetreye döner. Her işlem, RAPOR
+        sekmesindeki ANLIK GÖRÜNTÜ KAYITLARI'ndaki canlı kayda otomatik işlenir; işaretlemeler
+        sekme değişiminde korunur.
       </p>
 
       {/* araç seçimi */}
