@@ -11,12 +11,14 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import {
   Camera, Upload, Fingerprint, ScanText, BrainCircuit,
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
   Scissors, Undo2, FlaskConical, Sparkles, Video,
-  GitCompareArrows, ShieldCheck, Ruler, FileText,
+  GitCompareArrows, ShieldCheck, Ruler, FileText, Info,
+  type LucideIcon,
 } from 'lucide-react';
 import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
@@ -63,6 +65,59 @@ const TAB_HINTS: Record<string, string> = {
   ai: 'YZ adli analiz: bulgular, mürekkep farkları, silme şüphesi.',
   rapor: 'Vaka bilgileri, anlık görüntüler ve resmî PDF rapor.',
 };
+
+/** Sekme çubuğu grupları — sol mini etiket + ilişkili sekmeler (düzenli, taranabilir düzen). */
+const TAB_GROUPS: {
+  label: string;
+  items: { v: string; name: string; icon: LucideIcon; accent: string }[];
+}[] = [
+  {
+    label: 'İNCELEME',
+    items: [
+      { v: 'bant', name: 'BANT', icon: Radar, accent: 'text-amber-400' },
+      { v: 'islem', name: 'İŞLEM', icon: Contrast, accent: 'text-amber-300' },
+      { v: 'yon', name: 'YÖN', icon: Compass, accent: 'text-sky-400' },
+    ],
+  },
+  {
+    label: 'TAHRİP İZİ',
+    items: [
+      { v: 'karalama', name: 'KARALAMA', icon: Wand2, accent: 'text-amber-500' },
+      { v: 'silme', name: 'SİLME', icon: Eraser, accent: 'text-violet-400' },
+      { v: 'lab', name: 'LAB', icon: FlaskConical, accent: 'text-cyan-400' },
+    ],
+  },
+  {
+    label: 'STÜDYO',
+    items: [
+      { v: 'iyilestir', name: 'İYİLEŞTİR', icon: Sparkles, accent: 'text-sky-400' },
+      { v: 'video', name: 'VİDEO', icon: Video, accent: 'text-emerald-400' },
+      { v: 'karsilastir', name: 'KARŞILAŞTIR', icon: GitCompareArrows, accent: 'text-rose-400' },
+    ],
+  },
+  {
+    label: 'DELİL·ÖLÇÜM',
+    items: [
+      { v: 'delil', name: 'DELİL', icon: ShieldCheck, accent: 'text-fuchsia-400' },
+      { v: 'arac', name: 'ARAÇLAR', icon: Ruler, accent: 'text-indigo-300' },
+    ],
+  },
+  {
+    label: 'OKUMA·RAPOR',
+    items: [
+      { v: 'ocr', name: 'OCR', icon: ScanText, accent: 'text-emerald-300' },
+      { v: 'ai', name: 'YZ', icon: BrainCircuit, accent: 'text-amber-400' },
+      { v: 'rapor', name: 'RAPOR', icon: FileDown, accent: 'text-sky-300' },
+    ],
+  },
+];
+
+/** Gruplu sekme kapsülü — aktif durum amber kapsül + siyah yazı + amber halka, net ve görünür.
+ *  Not: dark: varyantları bilinçli olarak çift yazıldı — shadcn taban sınıfının
+ *  dark:data-[state=active]:bg-input/30 ve text-foreground varsayılanlarını tailwind-merge
+ *  ile düşürüp amber temayı garantilemek için. */
+const TAB_PILL_CLS =
+  'flex-none h-7 gap-1.5 rounded-md border border-transparent px-2.5 font-mono text-[11px] font-semibold tracking-wide text-muted-foreground hover:border-border hover:bg-card hover:text-foreground data-[state=active]:border-amber-600/70 dark:data-[state=active]:border-amber-600/70 data-[state=active]:bg-amber-600 dark:data-[state=active]:bg-amber-600 data-[state=active]:text-black dark:data-[state=active]:text-black data-[state=active]:ring-2 data-[state=active]:ring-amber-500/40 dark:data-[state=active]:ring-amber-500/40';
 
 type CompareMode = 'single' | 'split' | 'side';
 
@@ -649,25 +704,29 @@ export default function Home() {
         {/* kontrol paneli */}
         <aside className="flex min-h-0 flex-col">
           <Tabs defaultValue="bant" onValueChange={(v) => { setActiveTab(v); if (v !== 'video') video.pausePlayback(); }} className="flex h-full min-h-0 flex-col">
-            <TabsList className="mx-2 mt-2 flex h-auto w-auto shrink-0 flex-wrap justify-center gap-y-1 rounded-lg bg-card/60 p-1">
-              <TabsTrigger value="bant" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><Radar className="size-3" />BANT</TabsTrigger>
-              <TabsTrigger value="islem" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><Contrast className="size-3" />İŞLEM</TabsTrigger>
-              <TabsTrigger value="yon" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Compass className="size-3" />YÖN</TabsTrigger>
-              <TabsTrigger value="karalama" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-amber-500"><Wand2 className="size-3" />KARALAMA</TabsTrigger>
-              <TabsTrigger value="silme" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-violet-400"><Eraser className="size-3" />SİLME</TabsTrigger>
-              <TabsTrigger value="lab" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-cyan-400"><FlaskConical className="size-3" />LAB</TabsTrigger>
-              <TabsTrigger value="iyilestir" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Sparkles className="size-3" />İYİLEŞTİR</TabsTrigger>
-              <TabsTrigger value="video" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-emerald-400"><Video className="size-3" />VİDEO</TabsTrigger>
-              <TabsTrigger value="karsilastir" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-rose-400"><GitCompareArrows className="size-3" />KARŞILAŞTIR</TabsTrigger>
-              <TabsTrigger value="delil" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-fuchsia-400"><ShieldCheck className="size-3" />DELİL</TabsTrigger>
-              <TabsTrigger value="arac" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-indigo-300"><Ruler className="size-3" />ARAÇLAR</TabsTrigger>
-              <TabsTrigger value="ocr" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
-              <TabsTrigger value="ai" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
-              <TabsTrigger value="rapor" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
+            <TabsList className="mx-2 mt-2 flex h-auto w-auto shrink-0 flex-col items-stretch gap-1 rounded-lg border border-border/60 bg-card/70 p-1.5 shadow-sm">
+              {TAB_GROUPS.map((grp) => (
+                <div key={grp.label} className="flex items-center gap-1.5">
+                  <span className="w-[74px] shrink-0 select-none text-right font-mono text-[8px] font-bold tracking-[0.14em] text-muted-foreground/60">
+                    {grp.label}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {grp.items.map((t) => (
+                      <TabsTrigger key={t.v} value={t.v} className={TAB_PILL_CLS}>
+                        <t.icon className={cn('size-3.5', t.accent)} />
+                        {t.name}
+                      </TabsTrigger>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </TabsList>
-            <p className="mx-3 mt-1 shrink-0 truncate font-mono text-[9px] text-muted-foreground/80">
-              {TAB_HINTS[activeTab] ?? ''}
-            </p>
+            <div className="mx-2 mt-1.5 flex shrink-0 items-start gap-1.5 rounded-md border border-border/50 bg-card/40 px-2 py-1.5">
+              <Info className="mt-0.5 size-3 shrink-0 text-amber-500" />
+              <p className="line-clamp-2 font-mono text-[9px] leading-relaxed text-muted-foreground/90">
+                {TAB_HINTS[activeTab] ?? ''}
+              </p>
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                 <TabsContent value="bant" className="mt-0">
                   <SpectralPanel params={params} onChange={changeParams} />
@@ -774,7 +833,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.5
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.6
             </div>
           </div>
         </div>

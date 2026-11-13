@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Ruler, Undo2, Trash2, Download, Camera, CheckCircle2, Crosshair, MousePointerClick,
+  Ruler, Undo2, Trash2, Download, Camera, CheckCircle2, Crosshair, MousePointerClick, X,
 } from 'lucide-react';
 import {
   ANN_COLORS, KIND_LABELS, requiredPoints, dist, drawAnnotations,
@@ -85,7 +85,12 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
     const live = pending.length ? [...pending, hover ?? pending[pending.length - 1]] : undefined;
-    drawAnnotations(ctx, annotations, { ctx, scale, pxPerMm, livePts: live });
+    try {
+      drawAnnotations(ctx, annotations, { ctx, scale, pxPerMm, livePts: live });
+    } catch (err) {
+      // tek bir bozuk kayıt paneli boşaltmasın — kanvas görüntüsü yerinde kalır
+      console.error('Anotasyon çizimi hatası', err);
+    }
   }, [image, annotations, pending, hover, scale, pxPerMm, wrapW]);
 
   const toImageCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -259,12 +264,12 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         )}
       </div>
 
-      {/* kanvas — işaretleme yüzeyi */}
-      <div ref={wrapRef} className="overflow-hidden rounded-md border border-border bg-black/60">
+      {/* kanvas — işaretleme yüzeyi (yükseklik sınırlı: kontroller ilk ekranda kalır) */}
+      <div ref={wrapRef} className="grid place-items-center overflow-hidden rounded-md border border-border bg-black/60 p-1">
         {image ? (
           <canvas
             ref={canvasRef}
-            className="block h-auto w-full cursor-crosshair touch-none select-none"
+            className="mx-auto block h-auto w-auto max-h-[340px] max-w-full cursor-crosshair touch-none select-none"
             onPointerDown={onPointerDown}
             onPointerMove={(e) => setHover(toImageCoords(e))}
             onPointerLeave={() => setHover(null)}
@@ -302,9 +307,42 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         </Button>
       </div>
 
-      <p className="rounded-md border border-border bg-card/50 p-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
-        {annotations.length ? annotationsSummary(annotations, pxPerMm) : 'Henüz işaretleme yok.'}
-      </p>
+      {/* ölçüm kayıtları — her işaretleme bir satır, tek tek silinebilir */}
+      <div className="rounded-md border border-border bg-card/50">
+        <div className="flex items-center justify-between border-b border-border/60 px-2.5 py-1.5">
+          <span className="font-mono text-[9px] font-bold tracking-widest text-indigo-300">
+            ÖLÇÜM KAYITLARI ({annotations.length})
+          </span>
+          {pxPerMm && (
+            <span className="font-mono text-[9px] text-emerald-400">{pxPerMm.toFixed(2)} px/mm</span>
+          )}
+        </div>
+        {annotations.length ? (
+          <ul className="max-h-28 divide-y divide-border/40 overflow-y-auto">
+            {annotations.map((a) => (
+              <li key={a.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: a.color }} />
+                <span className="font-mono text-[10px] text-muted-foreground">{KIND_LABELS[a.kind]}</span>
+                <span className="ml-auto truncate font-mono text-[10px] text-foreground">
+                  {measureLabel(a, pxPerMm) ?? a.text ?? 'işaret'}
+                </span>
+                <button
+                  type="button"
+                  aria-label="kaydı sil"
+                  onClick={() => setAnnotations(annotations.filter((x) => x.id !== a.id))}
+                  className="shrink-0 text-muted-foreground/60 transition-colors hover:text-red-400"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="px-2.5 py-3 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
+            Henüz işaretleme yok — yukarıdan bir araç seçin ve belge üzerine tıklayın.
+          </p>
+        )}
+      </div>
 
       <p className="text-[10px] leading-relaxed text-muted-foreground/70">
         <Crosshair className="mr-1 inline size-3" />
