@@ -25,8 +25,8 @@ import {
   type EnhanceParams,
 } from '@/lib/forensic/enhance';
 
-/** İnce ayar kaydırıcısı — etiket + canlı değer. */
-function EnhSlider({
+/** İnce ayar kaydırıcısı — etiket + canlı değer. Video stüdyosu da paylaşır. */
+export function EnhSlider({
   label, value, min, max, onChange,
 }: {
   label: string;
@@ -53,7 +53,7 @@ function EnhSlider({
   );
 }
 
-function presetBtnCls(on: boolean): string {
+export function presetBtnCls(on: boolean): string {
   return `rounded-sm border px-2 py-0.5 font-mono text-[9px] tracking-wider transition-colors ${
     on
       ? 'border-sky-500 bg-sky-600 font-semibold text-black'
