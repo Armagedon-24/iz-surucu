@@ -154,12 +154,22 @@ export default function Home() {
   const [cropMode, setCropMode] = useState(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [cropUndo, setCropUndo] = useState<ImageData | null>(null);
+  // işaretleme taşıma modu — büyük ekranda uçlar sürüklenerek ayarlanır (REV 9.9)
+  const [annotEdit, setAnnotEdit] = useState(false);
+
+  /** Taşıma modu düğmesi — açılırken OCR bölge seçimini kapat (çakışmasın). */
+  const toggleAnnotEdit = useCallback((on: boolean) => {
+    setAnnotEdit(on);
+    if (on) setSelectMode(false);
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const caseNo = useCaseStore((s) => s.caseNo);
   const examiner = useCaseStore((s) => s.examiner);
   const ocrResults = useCaseStore((s) => s.ocrResults);
   const addAudit = useCaseStore((s) => s.addAudit);
+  const annotations = useCaseStore((s) => s.annotations);
+  const pxPerMm = useCaseStore((s) => s.pxPerMm);
   const setAnnotations = useCaseStore((s) => s.setAnnotations);
   const setPxPerMm = useCaseStore((s) => s.setPxPerMm);
   const removeSnapshot = useCaseStore((s) => s.removeSnapshot);
@@ -184,6 +194,7 @@ export default function Home() {
         setCropMode(false);
         setCropRect(null);
         setCropUndo(null);
+        setAnnotEdit(false);
         setSrcDataUrl(url);
         setAnnotations([]); // yeni delil — eski işaretlemeler geçersiz
         setPxPerMm(null); // kalibrasyon belgeye özgüdür — yeni delilde sıfır
@@ -645,7 +656,12 @@ export default function Home() {
               comparePct={comparePct}
               onComparePct={setComparePct}
               selectMode={selectMode}
-              onSelectMode={setSelectMode}
+              onSelectMode={(v) => { setSelectMode(v); if (v) setAnnotEdit(false); }}
+              annotations={annotations}
+              pxPerMm={pxPerMm}
+              annotEdit={annotEdit}
+              onAnnotEdit={toggleAnnotEdit}
+              onAnnotationsChange={setAnnotations}
               region={region}
               onRegionDone={setRegion}
               boxes={boxes ?? []}
@@ -837,7 +853,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.8
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.9
             </div>
           </div>
         </div>

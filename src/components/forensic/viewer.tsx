@@ -8,10 +8,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  Maximize2, Minus, Plus, SquareDashedMousePointer, ScanSearch,
+  Maximize2, Minus, Plus, SquareDashedMousePointer, ScanSearch, Move,
 } from 'lucide-react';
 import type { Rect } from '@/lib/forensic/filters';
 import type { AnomalyRegion } from '@/lib/forensic/pipeline';
+import type { Annotation } from '@/lib/forensic/annotate';
+import {
+  drawAnnotations, hitAnnotation, moveAnnotationPoint, translateAnnotation,
+} from '@/lib/forensic/annotate';
 
 export interface OcrBox {
   x0: number;
@@ -89,6 +93,14 @@ interface ViewerProps {
   cropMode: boolean;
   cropRect: CropRect | null;
   onCropRect: (r: CropRect | null) => void;
+  /** İşaretlemeler (ARAÇLAR panelinde çizilen) — büyük ekranda da görünür (REV 9.9). */
+  annotations: Annotation[];
+  pxPerMm: number | null;
+  /** Taşıma modu — işaretleme uçları ekranda sürüklenerek ayarlanır. */
+  annotEdit: boolean;
+  onAnnotEdit: (on: boolean) => void;
+  /** Sürükleme sonucu güncellenmiş işaretleme listesi. */
+  onAnnotationsChange: (a: Annotation[]) => void;
 }
 
 export function ImageViewer(props: ViewerProps) {
@@ -96,6 +108,7 @@ export function ImageViewer(props: ViewerProps) {
     original, processed, livePreview, hist, hudLeft, hudRight, compareMode,
     comparePct, onComparePct, selectMode, onSelectMode, region, onRegionDone,
     boxes, showBoxes, anomalies, showAnomalies, cropMode, cropRect, onCropRect,
+    annotations, pxPerMm, annotEdit, onAnnotEdit, onAnnotationsChange,
   } = props;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -121,11 +134,18 @@ export function ImageViewer(props: ViewerProps) {
     dist: number; scale: number; cx: number; cy: number; tx: number; ty: number;
   } | null>(null);
   const dragState = useRef<{
-    mode: 'pan' | 'region' | 'divider' | 'crop' | null;
+    mode: 'pan' | 'region' | 'divider' | 'crop' | 'annot' | null;
     sx: number; sy: number; stx: number; sty: number;
     rx0: number; ry0: number;
     handle?: string;
     cr?: CropRect;
+    /** taşıma sürüklemesi — hedef işaretleme ve başlangıç durumu */
+    annot?: {
+      annId: string;
+      index: number; // -1 = tümünü taşı
+      origPts: { x: number; y: number }[];
+      start: { x: number; y: number };
+    };
   }>({ mode: null, sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0 });
 
   const iw = processed?.width ?? original?.width ?? 1;
@@ -272,7 +292,20 @@ export function ImageViewer(props: ViewerProps) {
       ctx.fillStyle = '#fbbf24';
       ctx.fillText(label, x + 2 + fs * 0.4, ly);
     }
-  }, [boxes, showBoxes, anomalies, showAnomalies, region, cropMode, cropRect, scale, iw, ih]);
+
+    /* ---------- işaretlemeler (REV 9.9) — ARAÇLAR'da çizilenler büyük ekranda ---------- */
+    if (annotations.length) {
+      try {
+        drawAnnotations(ctx, annotations, {
+          ctx, scale, pxPerMm,
+          imgW: iw, imgH: ih, screenBase: 5, handles: annotEdit,
+        });
+      } catch (err) {
+        // bozuk kayıt büyük ekranı boşaltmasın
+        console.error('İşaretleme çizimi hatası', err);
+      }
+    }
+  }, [boxes, showBoxes, anomalies, showAnomalies, region, cropMode, cropRect, scale, iw, ih, annotations, pxPerMm, annotEdit]);
 
   /* ---------- histogram HUD ---------- */
   useEffect(() => {
@@ -396,6 +429,21 @@ export function ImageViewer(props: ViewerProps) {
     // dokunmatikte parmak ucuna yumuşak tolerans, farede hassas tolerans
     const hitTol = coarseRef.current ? 30 : 16;
 
+    // TAŞIMA MODU (REV 9.9) — işaretleme ucuna/gövdesine yakın tık sürüklemeye dönüşür;
+    // boş alana tık normal pan/zoom olarak sürer
+    if (annotEdit) {
+      const p = toImage(e.clientX, e.clientY);
+      const hit = hitAnnotation(annotations, p, hitTol / scale);
+      if (hit) {
+        dragState.current = {
+          mode: 'annot', sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0,
+          annot: { annId: hit.ann.id, index: hit.index, origPts: hit.ann.pts, start: p },
+        };
+        capturePointer(e);
+        return;
+      }
+    }
+
     if (cropMode) {
       const handle = hitHandle(cropRect, px, py, tx, ty, scale, hitTol);
       const p = toImage(e.clientX, e.clientY);
@@ -463,6 +511,22 @@ export function ImageViewer(props: ViewerProps) {
     } else if (ds.mode === 'divider') {
       const pct = Math.max(0, Math.min(100, ((px - tx) / (iw * scale)) * 100));
       onComparePct(pct);
+    } else if (ds.mode === 'annot' && ds.annot) {
+      // işaretleme taşıma — uç (uzunluk/açı ayarı) veya tüm kayıt
+      const p = toImage(e.clientX, e.clientY);
+      const { annId, index, origPts, start } = ds.annot;
+      const ann = annotations.find((x) => x.id === annId);
+      if (!ann) return;
+      let updated: Annotation;
+      if (index >= 0) {
+        updated = moveAnnotationPoint(ann, index, {
+          x: Math.max(0, Math.min(iw, p.x)),
+          y: Math.max(0, Math.min(ih, p.y)),
+        });
+      } else {
+        updated = translateAnnotation(ann, p.x - start.x, p.y - start.y);
+      }
+      onAnnotationsChange(annotations.map((x) => (x.id === annId ? updated : x)));
     } else if (ds.mode === 'crop') {
       const p = toImage(e.clientX, e.clientY);
       const ux = p.x;
@@ -544,7 +608,7 @@ export function ImageViewer(props: ViewerProps) {
       // sanıp pointercancel göndermesin (yoksa crop/pan/OCR bölgesi ölüyordu);
       // sayfa kaydırma görüntüleyici dışındaki alanlardan yapılır
       style={{
-        cursor: cropMode ? 'crosshair' : selectMode ? 'crosshair' : panning ? 'grabbing' : 'grab',
+        cursor: cropMode ? 'crosshair' : selectMode || annotEdit ? 'crosshair' : panning ? 'grabbing' : 'grab',
         touchAction: 'none',
       }}
       role="application" aria-label="Adli görüntü görüntüleyicisi"
@@ -635,6 +699,22 @@ export function ImageViewer(props: ViewerProps) {
             <Maximize2 className="size-4" />
           </Button>
         </div>
+        {annotations.length > 0 && (
+          <Button
+            size="sm"
+            variant={annotEdit ? 'default' : 'outline'}
+            className={`h-9 gap-2 font-mono text-[11px] ${annotEdit ? 'bg-amber-600 text-black hover:bg-amber-500' : 'bg-black/75 backdrop-blur-sm'}`}
+            onClick={() => onAnnotEdit(!annotEdit)}
+          >
+            <Move className="size-4" />
+            {annotEdit ? 'TAŞIMA MODU AÇIK' : 'İŞARETLEMELERİ DÜZENLE'}
+          </Button>
+        )}
+        {annotEdit && (
+          <div className="flex items-center gap-1.5 rounded-md border border-amber-700 bg-black/85 px-2.5 py-1.5 font-mono text-[10px] text-amber-400">
+            <Move className="size-3.5" /> Beyaz tutamaçları sürükleyerek ayarlayın
+          </div>
+        )}
         <Button
           size="sm"
           variant={selectMode ? 'default' : 'outline'}

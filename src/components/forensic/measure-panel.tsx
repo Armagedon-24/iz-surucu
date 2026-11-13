@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import {
   ANN_COLORS, ANN_THICKNESS, KIND_LABELS, requiredPoints, dist, drawAnnotations,
-  annotationsSummary, measureLabel, angleDeg,
+  annotationsSummary, measureLabel, angleDeg, mmLabel,
+  hitAnnotation, moveAnnotationPoint, translateAnnotation,
   type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
 import { useCaseStore, LIVE_ANNOT_SNAPSHOT_ID } from '@/lib/forensic/store';
@@ -43,6 +44,16 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
   const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Sürükleme durumu — varolan işaretlemenin ucu veya gövdesi taşınırken. */
+  const dragRef = useRef<{
+    annId: string;
+    kind: AnnKind;
+    index: number; // -1 = tümünü taşı
+    origPts: { x: number; y: number }[];
+    start: { x: number; y: number };
+  } | null>(null);
+  /** İmleç bir tutamaç/gövde üzerindeyse taşıma imleci göster. */
+  const [overHandle, setOverHandle] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [wrapW, setWrapW] = useState(0);
@@ -113,7 +124,15 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     }
   }, [image, renderFull, pxPerMm, upsertSnapshot, removeSnapshot]);
 
-  /* ana çizim — görüntü + anotasyonlar + canlı seçim */
+  /* CANLI KAYIT (REV 9.8/9.9) — işaretlemeler her değiştiğinde (panel çizimi,
+   * GERİ AL, büyük ekrandan sürükleme…) tam çözünürlüklü küçük resim 350 ms
+   * sonra depoya işlenir: sürükleme sırasında her karede yazılmaz, bitişte
+   * tek güncelleme düşer. RAPOR → ANLIK GÖRÜNTÜ KAYITLARI her zaman güncel. */
+  useEffect(() => {
+    if (!image) return;
+    const t = setTimeout(() => syncLiveRecord(annotations), 350);
+    return () => clearTimeout(t);
+  }, [image, annotations, syncLiveRecord]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !image || !wrapW) return;
@@ -131,6 +150,7 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
       drawAnnotations(ctx, annotations, {
         ctx, scale, pxPerMm, livePts: live,
         imgW: image.width, imgH: image.height, thickness,
+        screenBase: 4, handles: true,
       });
     } catch (err) {
       // tek bir bozuk kayıt paneli boşaltmasın — kanvas görüntüsü yerinde kalır
@@ -170,29 +190,69 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     const next = [...annotations, ann];
     setAnnotations(next);
     setPending([]);
-    syncLiveRecord(next); // canlı kayıt — RAPOR küçük resimlerine anında işlenir
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!image) return;
     const p = toImageCoords(e);
+    // TAŞIMA (REV 9.9) — tıklama varolan işaretlemenin ucu/gövdesine düşüyorsa
+    // yeni nokta koymak yerine sürükleme başlat (uç: uzunluk/açı ayarı, gövde: kaydırma)
+    const hit = hitAnnotation(annotations, p, 12 / scale);
+    if (hit) {
+      dragRef.current = {
+        annId: hit.ann.id, kind: hit.ann.kind, index: hit.index,
+        origPts: hit.ann.pts, start: p,
+      };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* işaretçi bırakıldı */ }
+      return;
+    }
     const need = requiredPoints(tool);
     const next = [...pending, p];
     if (next.length >= need) commit(next);
     else setPending(next);
   };
 
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!image) return;
+    const p = toImageCoords(e);
+    const drag = dragRef.current;
+    if (drag) {
+      let next: Annotation[];
+      if (drag.index >= 0) {
+        const clamped = {
+          x: Math.max(0, Math.min(image.width, p.x)),
+          y: Math.max(0, Math.min(image.height, p.y)),
+        };
+        next = annotations.map((a) => (a.id === drag.annId ? moveAnnotationPoint(a, drag.index, clamped) : a));
+      } else {
+        next = annotations.map((a) => (a.id === drag.annId ? translateAnnotation(a, p.x - drag.start.x, p.y - drag.start.y) : a));
+      }
+      setAnnotations(next);
+      return;
+    }
+    setHover(p);
+    setOverHandle(!!hitAnnotation(annotations, p, 12 / scale));
+  };
+
+  const endDrag = () => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    setOverHandle(false);
+    addAudit(
+      'İŞARETLEME DÜZENLE',
+      `${KIND_LABELS[drag.kind]} ${drag.index >= 0 ? 'ucu sürüklenerek' : 'gövdesinden kaydırılarak'} ayarlandı`,
+    );
+  };
+
   const undo = () => {
     if (pending.length) { setPending((p) => p.slice(0, -1)); return; }
-    const next = annotations.slice(0, -1);
-    setAnnotations(next);
-    syncLiveRecord(next);
+    setAnnotations(annotations.slice(0, -1));
   };
 
   const clearAll = () => {
     setPending([]);
     setAnnotations([]);
-    syncLiveRecord([]);
   };
 
   const download = () => {
@@ -266,7 +326,7 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     const pts = hover && pending.length ? [...pending, hover] : pending;
     if (tool === 'ruler' && pts.length === 2) {
       const px = dist(pts[0], pts[1]);
-      return pxPerMm ? `${(px / pxPerMm).toFixed(1)} mm` : `${px.toFixed(0)} px`;
+      return pxPerMm ? mmLabel(px / pxPerMm) : `${px.toFixed(0)} px`;
     }
     if (tool === 'angle' && pts.length === 3) return `${angleDeg(pts)}°`;
     return null;
@@ -291,9 +351,11 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Bulguyu belge üzerine işaretleyin ve ölçün. Cetvel, adli cetvel bandı (siyah/beyaz
-        bloklar) olarak çizilir; kalibrasyonla ölçüler milimetreye döner. Her işlem, RAPOR
-        sekmesindeki ANLIK GÖRÜNTÜ KAYITLARI'ndaki canlı kayda otomatik işlenir; işaretlemeler
-        sekme değişiminde korunur.
+        bloklar) olarak çizilir; kalibrasyonla ölçüler santimetre + milimetre yazar.
+        Çizilen işaretlemelerin uçlarını sürükleyerek ayarlayabilir, gövdesinden
+        kaydırabilirsiniz — büyük ekranda TAŞIMA modu ile de olur. Her işlem, RAPOR
+        sekmesindeki ANLIK GÖRÜNTÜ KAYITLARI'ndaki canlı kayda otomatik işlenir;
+        işaretlemeler sekme değişiminde korunur.
       </p>
 
       {/* araç seçimi */}
@@ -338,9 +400,11 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         {image ? (
           <canvas
             ref={canvasRef}
-            className="mx-auto block h-auto w-auto max-h-[340px] max-w-full cursor-crosshair touch-none select-none"
+            className={`mx-auto block h-auto w-auto max-h-[340px] max-w-full touch-none select-none ${overHandle ? 'cursor-move' : 'cursor-crosshair'}`}
             onPointerDown={onPointerDown}
-            onPointerMove={(e) => setHover(toImageCoords(e))}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
             onPointerLeave={() => setHover(null)}
           />
         ) : (
@@ -354,6 +418,7 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         <MousePointerClick className="mt-0.5 size-3 shrink-0" />
         {toolHint}
         {pending.length > 0 && ` (${pending.length}/${need} nokta)`}
+        {' — '}İşaretlemelerin beyaz tutamaçlarından sürükleyip ucu/gövdesini ayarlayabilirsiniz.
       </p>
 
       {/* eylemler */}

@@ -16,6 +16,11 @@
  * çizgisi boyunca siyah/beyaz bloklardan ölçek bandı, dik uç kapamaları,
  * (kalibre edildiyse) bloklarda cm numaraları ve seçilen renkte çerçeve.
  * Böylece ölçü, raporda "adli cetvelle ölçülmüştür" algısı verir.
+ *
+ * BÜYÜK EKRAN + TAŞIMA (REV 9.9): işaretlemeler ana görüntüleyicide de çizilir
+ * (screenBase ile paneldekinden kalın); düzenleme modunda uçlarda ekranda sabit
+ * boyutlu taşıma tutamaçları belirir ve hit-test ile uçlar/gövde sürüklenerek
+ * ayarlanır. Kalibre ölçüler hem santimetre hem milimetre yazılır.
  */
 
 export type AnnKind = 'ruler' | 'angle' | 'arrow' | 'circle' | 'rect' | 'text' | 'calib';
@@ -75,11 +80,17 @@ export function angleDeg(pts: { x: number; y: number }[]): number {
   return +(Math.acos(Math.max(-1, Math.min(1, dot / m))) * 180 / Math.PI).toFixed(1);
 }
 
+/** Mesafeyi hem santimetre hem milimetre olarak biçimler — Türkçe ondalık virgülle.
+ *  Örn. 125.4 mm → "12,54 cm (125,4 mm)". */
+export function mmLabel(mm: number): string {
+  return `${(mm / 10).toFixed(2).replace('.', ',')} cm (${mm.toFixed(1).replace('.', ',')} mm)`;
+}
+
 /** Anotasyonun görüntü üzerindeki ölçü etiketi. */
 export function measureLabel(a: Annotation, pxPerMm: number | null): string | null {
   if (a.kind === 'ruler' && a.pts.length === 2) {
     const px = dist(a.pts[0], a.pts[1]);
-    return pxPerMm ? `${(px / pxPerMm).toFixed(1)} mm` : `${px.toFixed(0)} px`;
+    return pxPerMm ? mmLabel(px / pxPerMm) : `${px.toFixed(0)} px`;
   }
   if (a.kind === 'angle' && a.pts.length === 3) return `${angleDeg(a.pts)}°`;
   if (a.kind === 'calib' && a.pts.length === 2 && a.mm) {
@@ -100,6 +111,10 @@ interface DrawCtx {
   imgH?: number;
   /** kalınlık çarpanı — İNCE 0.8 / NORMAL 1 / KALIN 1.5 */
   thickness?: number;
+  /** ekran-sabit çizgi tabanı (px) — panelde 4, büyük görüntüleyicide 5 */
+  screenBase?: number;
+  /** düzenleme modu — uçlarda taşıma tutamaçları çizilir */
+  handles?: boolean;
 }
 
 /** Çizim birimi (görüntü pikseli cinsinden): panelde ekran-sabit,
@@ -107,7 +122,7 @@ interface DrawCtx {
 function unit(d: DrawCtx): number {
   const t = d.thickness ?? 1;
   const minDim = Math.min(d.imgW ?? 1200, d.imgH ?? 1600);
-  return Math.max(3.5 / d.scale, minDim / 110) * t;
+  return Math.max((d.screenBase ?? 3.5) / d.scale, minDim / 110) * t;
 }
 
 /** Renkli çekirdeğin altındaki kontrast kontur rengi — her zeminde görünür. */
@@ -160,6 +175,27 @@ function drawDot(d: DrawCtx, x: number, y: number, u: number, color: string): vo
   ctx.fill();
   ctx.beginPath();
   ctx.arc(x, y, u * 1.05, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Düzenleme tutamacı (REV 9.9) — ekranda sabit boyutlu beyaz daire + renkli
+ *  halka + merkez nokta; her zeminde görünür, taşıma alanını gösterir. */
+function drawHandle(d: DrawCtx, x: number, y: number, color: string, u: number): void {
+  const { ctx, scale } = d;
+  const r = Math.max(u * 1.2, 5.5 / scale);
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, u * 0.35);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.42, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
@@ -321,6 +357,81 @@ function drawTicks(d: DrawCtx, a: { x: number; y: number }, b: { x: number; y: n
   }
 }
 
+/** Nokta-kesit mesafesi — gövde hit-testi için. */
+function segDist(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  p: { x: number; y: number },
+): number {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const wx = p.x - a.x;
+  const wy = p.y - a.y;
+  const L2 = vx * vx + vy * vy;
+  if (!L2) return Math.hypot(wx, wy);
+  const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / L2));
+  return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
+}
+
+export interface AnnotationHit {
+  ann: Annotation;
+  /** sürüklenecek nokta indeksi; -1 = tüm işaretleme taşınır */
+  index: number;
+}
+
+/** İşaretleme hit-testi (görüntü uzayı) — önce uçlar, sonra gövde; üstteki
+ *  (son çizilen) işaretlemeler önceliklidir. Tol: görüntü pikseli cinsinden. */
+export function hitAnnotation(
+  anns: Annotation[],
+  p: { x: number; y: number },
+  tol: number,
+): AnnotationHit | null {
+  for (let i = anns.length - 1; i >= 0; i--) {
+    const a = anns[i];
+    for (let k = 0; k < a.pts.length; k++) {
+      if (dist(a.pts[k], p) <= tol) return { ann: a, index: k };
+    }
+  }
+  for (let i = anns.length - 1; i >= 0; i--) {
+    const a = anns[i];
+    const q = a.pts;
+    let hit = false;
+    if (a.kind === 'ruler' || a.kind === 'arrow' || a.kind === 'calib') {
+      hit = q.length === 2 && segDist(q[0], q[1], p) <= tol * 1.6;
+    } else if (a.kind === 'angle') {
+      hit = q.length === 3 && (segDist(q[0], q[1], p) <= tol * 1.6 || segDist(q[1], q[2], p) <= tol * 1.6);
+    } else if (a.kind === 'circle') {
+      hit = q.length === 2 && Math.abs(dist(q[0], p) - dist(q[0], q[1])) <= tol * 1.6;
+    } else if (a.kind === 'rect') {
+      if (q.length === 2) {
+        const x0 = Math.min(q[0].x, q[1].x);
+        const x1 = Math.max(q[0].x, q[1].x);
+        const y0 = Math.min(q[0].y, q[1].y);
+        const y1 = Math.max(q[0].y, q[1].y);
+        hit = p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol;
+      }
+    } else if (a.kind === 'text') {
+      hit = q.length >= 1 && dist(q[0], p) <= tol * 3;
+    }
+    if (hit) return { ann: a, index: -1 };
+  }
+  return null;
+}
+
+/** İşaretlemenin bir noktasını taşır (yeni kayıt döner, orijinal değişmez). */
+export function moveAnnotationPoint(
+  a: Annotation,
+  index: number,
+  p: { x: number; y: number },
+): Annotation {
+  return { ...a, pts: a.pts.map((q, i) => (i === index ? p : q)) };
+}
+
+/** Tüm işaretlemeyi (dx, dy) kadar kaydırır. */
+export function translateAnnotation(a: Annotation, dx: number, dy: number): Annotation {
+  return { ...a, pts: a.pts.map((q) => ({ x: q.x + dx, y: q.y + dy })) };
+}
+
 /** Tüm anotasyonları (ve canlı seçimi) ekrana çizer. */
 export function drawAnnotations(
   ctx: CanvasRenderingContext2D,
@@ -462,6 +573,14 @@ export function drawAnnotations(
     ctx.stroke();
     ctx.restore();
     for (const pt of live) drawDot(d, pt.x, pt.y, u * 0.75, '#f59e0b');
+  }
+  // düzenleme tutamaçları (REV 9.9) — taşıma modunda her uçta ekranda sabit daire
+  if (d.handles) {
+    const uh = unit({ ...d, thickness: 1 });
+    for (const a of anns) {
+      if (a.kind === 'text') continue;
+      for (const pt of a.pts) drawHandle(d, pt.x, pt.y, a.color, uh);
+    }
   }
 }
 
