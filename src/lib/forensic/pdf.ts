@@ -288,6 +288,28 @@ export async function buildOfficialPdf(d: ReportData, deps: PdfDeps = {}): Promi
     y += 2.5;
   });
 
+  if (c.integrityLine) {
+    y += 1;
+    ensure(18);
+    text('Delil bütünlüğü (SHA-256, yükleme anında kayıt altına alındı):', { size: 9.5, style: 'bold', gapAfter: 1 });
+    text(c.integrityLine, { size: 9, color: [70, 70, 70], lh: 4.4, gapAfter: 2 });
+  }
+  if (c.metaNotes.length) {
+    y += 1;
+    ensure(20);
+    text(`IV.4 — Üst Veri (EXIF) Değerlendirme Notları (${c.metaNotes.length} adet)`, { size: 10.5, style: 'bold', gapAfter: 2 });
+    numbered(c.metaNotes, 9.5);
+  }
+  if (c.auditItems.length) {
+    y += 1;
+    ensure(20);
+    text(`IV.5 — Denetim İzi: İşlem Kayıtları (${c.auditItems.length} adet)`, { size: 10.5, style: 'bold', gapAfter: 2 });
+    for (const line of c.auditItems) {
+      text(line, { size: 8.5, color: [60, 60, 60], lh: 4.2, gapAfter: 0 });
+    }
+    y += 2;
+  }
+
   /* ------------------------- V. SONUÇ ------------------------- */
   sectionTitle(5, 'Sonuç ve Kanaat');
   for (const p of c.sonuc) text(p);

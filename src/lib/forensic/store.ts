@@ -4,6 +4,15 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Params } from '@/lib/forensic/pipeline';
+import type { Annotation } from '@/lib/forensic/annotate';
+
+/** Denetim izi kaydı — zincirleme saklama ve resmî rapor için. */
+export interface AuditEntry {
+  id: string;
+  ts: number;
+  action: string; // kısa kod (LOAD, KURTARMA, ANOMALİ…)
+  detail?: string;
+}
 
 export interface Snapshot {
   id: string;
@@ -40,6 +49,10 @@ interface CaseStore {
   snapshots: Snapshot[];
   analyses: AnalysisRecord[];
   ocrResults: OcrRecord[];
+  audit: AuditEntry[]; // denetim izi — yapılan her işlem kronolojik
+  annotations: Annotation[]; // ölçüm/işaretleme — araçlar sekmesi
+  metaNotes: string[]; // üst veri (EXIF) özet notları — delil sekmesi
+  aiDraft: string; // YZ rapor taslağı — rapor sekmesi
   setCaseNo: (v: string) => void;
   setExaminer: (v: string) => void;
   setAuthority: (v: string) => void;
@@ -48,6 +61,11 @@ interface CaseStore {
   removeSnapshot: (id: string) => void;
   addAnalysis: (a: AnalysisRecord) => void;
   addOcr: (o: OcrRecord) => void;
+  addAudit: (action: string, detail?: string) => void;
+  clearAudit: () => void;
+  setAnnotations: (a: Annotation[]) => void;
+  setMetaNotes: (n: string[]) => void;
+  setAiDraft: (t: string) => void;
   resetCase: () => void;
 }
 
@@ -67,6 +85,10 @@ export const useCaseStore = create<CaseStore>()(
       snapshots: [],
       analyses: [],
       ocrResults: [],
+      audit: [],
+      annotations: [],
+      metaNotes: [],
+      aiDraft: '',
       setCaseNo: (v) => set({ caseNo: v }),
       setExaminer: (v) => set({ examiner: v }),
       setAuthority: (v) => set({ authority: v }),
@@ -75,6 +97,22 @@ export const useCaseStore = create<CaseStore>()(
       removeSnapshot: (id) => set((st) => ({ snapshots: st.snapshots.filter((x) => x.id !== id) })),
       addAnalysis: (a) => set((st) => ({ analyses: [a, ...st.analyses].slice(0, 12) })),
       addOcr: (o) => set((st) => ({ ocrResults: [o, ...st.ocrResults].slice(0, 12) })),
+      addAudit: (action, detail) =>
+        set((st) => ({
+          audit: [
+            ...st.audit,
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              ts: Date.now(),
+              action,
+              detail,
+            },
+          ].slice(-120), // en eski kayıtlar düşer — iz kronolojik sırada kalır
+        })),
+      clearAudit: () => set({ audit: [] }),
+      setAnnotations: (a) => set({ annotations: a.slice(0, 60) }),
+      setMetaNotes: (n) => set({ metaNotes: n.slice(0, 12) }),
+      setAiDraft: (t) => set({ aiDraft: t.slice(0, 20000) }),
       resetCase: () =>
         set({
           caseNo: newCaseNo(),
@@ -82,6 +120,10 @@ export const useCaseStore = create<CaseStore>()(
           snapshots: [],
           analyses: [],
           ocrResults: [],
+          audit: [],
+          annotations: [],
+          metaNotes: [],
+          aiDraft: '',
         }),
     }),
     {
@@ -90,6 +132,12 @@ export const useCaseStore = create<CaseStore>()(
     }
   )
 );
+
+/** Denetim kaydını rapor/dizin satırına biçimler. */
+export function formatAuditEntry(e: AuditEntry): string {
+  const t = new Date(e.ts).toLocaleString('tr-TR');
+  return `[${t}] ${e.action}${e.detail ? ` — ${e.detail}` : ''}`;
+}
 
 export function paramsSummary(params: Params): string {
   const parts: string[] = [];

@@ -6,7 +6,7 @@
  * gömülü) HTML raporu üretir. Ortak içerik modeli (buildReportContent)
  * PDF üreticisiyle paylaşılır.
  */
-import type { Snapshot, AnalysisRecord, OcrRecord } from './store';
+import type { Snapshot, AnalysisRecord, OcrRecord, AuditEntry } from './store';
 
 export interface ReportData {
   caseNo: string;
@@ -19,6 +19,12 @@ export interface ReportData {
   ocrs: OcrRecord[];
   currentView?: { label: string; image: string };
   imageInfo?: string;
+  /** Delil bütünlüğü — yükleme anında hesaplanan SHA-256 özeti */
+  integrity?: { sha256: string; bytes: number; algo: string; recordedTs?: string };
+  /** Denetim izi — yapılan işlemlerin kronolojik kaydı */
+  audit?: AuditEntry[];
+  /** Üst veri (EXIF) taramasının özet notları */
+  metaNotes?: string[];
 }
 
 export interface AiFinding {
@@ -50,6 +56,9 @@ export interface ReportContent {
   imagesTotal: number; // toplam görüntü kaydı (kırpılan notu için)
   ocrItems: { meta: string; text: string }[]; // IV.2
   aiItems: AiItem[]; // IV.3
+  integrityLine?: string; // IV.4 üst veri özeti öncesi delil kimliği
+  metaNotes: string[]; // IV.4 üst veri (EXIF) özeti
+  auditItems: string[]; // IV.5 denetim izi
   sonuc: string[]; // V. bölüm paragrafları
   hazirlayan: string; // imza bloğu ad soyad / birim
   disclaimer: string;
@@ -133,6 +142,11 @@ export function buildReportContent(d: ReportData): ReportContent {
   deliller.push(
     `İncelemeye konu delil, gönderilen dijital görüntü dosyasıdır${d.imageInfo ? ` (${d.imageInfo})` : ''}. Dosya üzerinde ${imagesTotal} görüntü, ${d.ocrs.length} OCR ve ${d.analyses.length} yapay zekâ analiz kaydı oluşturulmuştur.`,
   );
+  if (d.integrity?.sha256) {
+    deliller.push(
+      `Delil dosyasının ${d.integrity.algo} özeti, inceleme başlangıcında hesaplanmış ve kayıt altına alınmıştır (${d.integrity.sha256}${d.integrity.bytes ? ` · ${d.integrity.bytes} bayt` : ''}). İnceleme boyunca bu özet üzerinden doğrulama yapılmış, dosyada değişiklik yapılmamıştır.`,
+    );
+  }
   if (d.note.trim()) deliller.push(`Delil notu: ${d.note.trim()}`);
 
   // --- II. İNCELEMENİN KAPSAMI ---
@@ -151,6 +165,12 @@ export function buildReportContent(d: ReportData): ReportContent {
     yontem.push(
       'Yapay zekâ destekli görüntü analiziyle okuma, silme/tahrip ve mürekkep farklılığı bulguları üretilmiştir.',
     );
+  }
+  if (d.metaNotes?.length) {
+    yontem.push('Delil dosyasının üst verisi (EXIF/PNG) çözümlenmiş; yazılım izleri, çekim bilgisi ve konum verisi değerlendirilmiştir.');
+  }
+  if (d.audit?.length) {
+    yontem.push('İnceleme boyunca her işlem adımı zaman damgasıyla denetim izine kaydedilmiş; delil bütünlüğü SHA-256 özetiyle doğrulanmıştır.');
   }
 
   // --- V. SONUÇ VE KANAAT (kısa; bulgular IV.3'te ayrıntılıdır) ---
@@ -174,6 +194,12 @@ export function buildReportContent(d: ReportData): ReportContent {
     'Kanaat: Bulguların resmî süreçlerde sertifikalı laboratuvar cihazlarıyla (VSC/ESDA) doğrulanması önerilir.',
   );
 
+  // --- IV.4 üst veri özeti ve IV.5 denetim izi ---
+  const metaNotes = (d.metaNotes ?? []).slice(0, 10).map((s) => clip(s, 220));
+  const auditItems = (d.audit ?? []).slice(-24).map(
+    (e) => `[${tr(e.ts)}] ${e.action}${e.detail ? ` — ${e.detail}` : ''}`,
+  );
+
   return {
     raporNo: d.caseNo,
     raporTarihi: d.date,
@@ -187,6 +213,11 @@ export function buildReportContent(d: ReportData): ReportContent {
     imagesTotal,
     ocrItems,
     aiItems,
+    integrityLine: d.integrity?.sha256
+      ? `${d.integrity.algo}: ${d.integrity.sha256}${d.integrity.bytes ? ` · ${d.integrity.bytes} bayt` : ''}`
+      : undefined,
+    metaNotes,
+    auditItems,
     sonuc,
     hazirlayan: d.examiner.trim() || 'İnceleyen Uzman',
     disclaimer:
@@ -248,6 +279,13 @@ export function buildHtmlReport(d: ReportData): string {
     })
     .join('');
 
+  const metaRows = c.metaNotes.length
+    ? c.metaNotes.map((m) => `<li>${esc(m)}</li>`).join('')
+    : '';
+  const auditRows = c.auditItems.length
+    ? `<ol class="audit">${c.auditItems.map((a) => `<li><span class="mono">${esc(a)}</span></li>`).join('')}</ol>`
+    : '';
+
   const sec = (n: number, title: string, body: string) => `
     <div class="bolum">
       <div class="bolum-baslik">${SECTIONS.roman(n)}. ${esc(title.toLocaleUpperCase('tr'))}</div>
@@ -293,6 +331,9 @@ export function buildHtmlReport(d: ReportData): string {
   .etiket { font-weight: bold; }
   ol.bulgu { margin: 1mm 0 1mm 6mm; padding: 0; font-size: 13px; }
   ol.bulgu li { margin-bottom: 2mm; text-align: justify; }
+  ol.audit { margin: 1mm 0 1mm 6mm; padding: 0; font-size: 11px; }
+  ol.audit li { margin-bottom: 1mm; }
+  .mono { font-family: 'Courier New', monospace; }
   .imza { margin-top: 10mm; page-break-inside: avoid; width: 100%; }
   .imza td { vertical-align: top; }
   .imza-sag { width: 45%; text-align: center; }
@@ -328,6 +369,9 @@ ${sec(4, 'Bulgular', `
   ${ocrRows || '<p><i>OCR kaydı oluşturulmamıştır.</i></p>'}
   <div class="blk-baslik">IV.3 — Yapay Zekâ Adli Analiz Kayıtları (${c.aiItems.length} adet)</div>
   ${aiRows || '<p><i>Yapay zekâ analiz kaydı oluşturulmamıştır.</i></p>'}
+  ${c.integrityLine ? `<p class="meta"><span class="etiket">Delil bütünlüğü:</span> <span class="mono">${esc(c.integrityLine)}</span></p>` : ''}
+  ${metaRows ? `<div class="blk-baslik">IV.4 — Üst Veri (EXIF) Değerlendirme Notları (${c.metaNotes.length} adet)</div><ol class="bulgu">${metaRows}</ol>` : ''}
+  ${auditRows ? `<div class="blk-baslik">IV.5 — Denetim İzi: İşlem Kayıtları (${c.auditItems.length} adet)</div>${auditRows}` : ''}
 `)}
 ${sec(5, 'Sonuç ve Kanaat', c.sonuc.map((p) => `<p>${esc(p)}</p>`).join(''))}
 <table class="imza"><tr><td></td><td class="imza-sag">

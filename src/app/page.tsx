@@ -16,6 +16,7 @@ import {
   FileDown, Radar, RotateCw, Download, SplitSquareHorizontal, Columns2,
   Square, Loader2, ShieldAlert, Contrast, Landmark, Wand2, Eraser, Compass,
   Scissors, Undo2, FlaskConical, Sparkles, Video,
+  GitCompareArrows, ShieldCheck, Ruler, FileText,
 } from 'lucide-react';
 import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/viewer';
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
@@ -28,6 +29,11 @@ import { LabPanel } from '@/components/forensic/lab-panel';
 import { DirectionPanel } from '@/components/forensic/direction-panel';
 import { EnhancementPanel } from '@/components/forensic/enhancement-panel';
 import { VideoPanel, VideoStage, useVideoStudio } from '@/components/forensic/video-panel';
+import { ComparePanel } from '@/components/forensic/compare-panel';
+import { EvidencePanel } from '@/components/forensic/evidence-panel';
+import { MeasurePanel } from '@/components/forensic/measure-panel';
+import { ExhibitBar } from '@/components/forensic/exhibit-bar';
+import { PdfPagePicker } from '@/components/forensic/pdf-page-picker';
 import { CameraCapture } from '@/components/forensic/camera-modal';
 import {
   DEFAULT_PARAMS, getBand, processPipeline, scanAnomalies,
@@ -36,6 +42,7 @@ import {
 import { histogram, mixToGray, type Rect } from '@/lib/forensic/filters';
 import { dataUrlToImageData, imageDataToDataUrl, downloadDataUrl } from '@/lib/forensic/canvas';
 import { useCaseStore, paramsSummary } from '@/lib/forensic/store';
+import { sha256OfDataUrl } from '@/lib/forensic/hash';
 
 const WORKING_MAX = 1800;
 
@@ -49,6 +56,9 @@ const TAB_HINTS: Record<string, string> = {
   lab: 'Gerçek laboratuvar teknikleri: UV florisans, IR lüminesans, ESDA girinti, CLAHE, kanal ayrıştırma.',
   iyilestir: 'İyileştirme stüdyosu — fotoğraf/resim estetiği: pozlama, renk, gölge/ışık, detay; OTOMATİK İYİLEŞTİR tek tuşla dengeler.',
   video: 'Video iyileştirme stüdyosu — oynatım sırasında her kare canlı iyileştirilir; KAYDET ile WEBM indirilir.',
+  karsilastir: 'Karşılaştırma stüdyosu — iki delili fark haritası, göz kırpma ve süpürmeyle imza/senet/mühür karşılaştırması.',
+  delil: 'Delil bütünlüğü (SHA-256), üst veri/EXIF yazılım izleri, barkod/QR okuma ve denetim izi.',
+  arac: 'Ölçüm ve işaretleme — cetvel (mm kalibrasyonu), açı, ok/daire işaretleme; rapora gömülür.',
   ocr: 'Metni makineyle okur — bölge seçerek isabeti artırın.',
   ai: 'YZ adli analiz: bulgular, mürekkep farkları, silme şüphesi.',
   rapor: 'Vaka bilgileri, anlık görüntüler ve resmî PDF rapor.',
@@ -76,8 +86,15 @@ export default function Home() {
   const [scanning, setScanning] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [appliedMode, setAppliedMode] = useState<'' | 'recovery' | 'enhance'>('');
+  const [appliedMode, setAppliedMode] = useState<'' | 'recovery' | 'enhance' | 'compare'>('');
   const [activeTab, setActiveTab] = useState('bant');
+  // delil kimliği — orijinal dosyanın ham baytlarının SHA-256 özeti
+  const [srcDataUrl, setSrcDataUrl] = useState('');
+  const [srcSha, setSrcSha] = useState('');
+  const [srcBytes, setSrcBytes] = useState(0);
+  // çok sayfalı PDF içe aktarma
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
   // inceleme varyantı kesme modu
   const [cropMode, setCropMode] = useState(false);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
@@ -87,6 +104,9 @@ export default function Home() {
   const caseNo = useCaseStore((s) => s.caseNo);
   const examiner = useCaseStore((s) => s.examiner);
   const ocrResults = useCaseStore((s) => s.ocrResults);
+  const addAudit = useCaseStore((s) => s.addAudit);
+  const setAnnotations = useCaseStore((s) => s.setAnnotations);
+  const setMetaNotes = useCaseStore((s) => s.setMetaNotes);
   const band = getBand(params.band);
   const video = useVideoStudio(toast);
 
@@ -107,12 +127,22 @@ export default function Home() {
         setCropMode(false);
         setCropRect(null);
         setCropUndo(null);
+        setSrcDataUrl(url);
+        setAnnotations([]); // yeni delil — eski işaretlemeler geçersiz
+        setMetaNotes([]); // eski EXIF notları temiz
+        setSrcSha('');
+        setSrcBytes(0);
         toast({ title: 'Görüntü yüklendi', description: `${img.width}×${img.height} px — incelemeye hazır` });
+        // delil kimliği — ham baytların SHA-256 özeti (denetim izine)
+        const { hex, bytes } = await sha256OfDataUrl(url);
+        setSrcSha(hex);
+        setSrcBytes(bytes);
+        addAudit('DELİL YÜKLEME', `${name || 'belge.png'} · ${bytes} bayt · SHA-256 ${hex.slice(0, 16)}…`);
       } catch (e) {
         toast({ title: 'Görüntü okunamadı', description: (e as Error).message, variant: 'destructive' });
       }
     },
-    [toast]
+    [toast, addAudit, setAnnotations, setMetaNotes]
   );
 
   const loadFile = useCallback(
@@ -122,8 +152,13 @@ export default function Home() {
         setActiveTab('video');
         return;
       }
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        setPdfFile(file);
+        setPdfOpen(true);
+        return;
+      }
       if (!file.type.startsWith('image/')) {
-        toast({ title: 'Desteklenmeyen dosya', description: 'Lütfen bir görsel dosyası seçin.', variant: 'destructive' });
+        toast({ title: 'Desteklenmeyen dosya', description: 'Lütfen bir görsel, video veya PDF dosyası seçin.', variant: 'destructive' });
         return;
       }
       const reader = new FileReader();
@@ -183,7 +218,7 @@ export default function Home() {
     setParams((s) => ({ ...s, ...p }));
   }, []);
 
-  const handleApplyRecovery = useCallback((out: ImageData, _label: string) => {
+  const handleApplyRecovery = useCallback((out: ImageData, label: string) => {
     const g = mixToGray(out, [0.299, 0.587, 0.114]);
     setProcessed({ out, hist: histogram(g), ms: 0 });
     setAppliedMode('recovery');
@@ -191,7 +226,8 @@ export default function Home() {
     setCropRect(null);
     setCropUndo(null);
     setLivePreview(null); // taahhüt edildi — canlı katmanı kapat, tam çözünürlüğü göster
-  }, []);
+    addAudit('VARYANT UYGULA', label || 'karalama/silme/lab tekniği');
+  }, [addAudit]);
 
   /* ---------------- iyileştirme stüdyosu ---------------- */
   const handleApplyEnhance = useCallback((out: ImageData, _label: string) => {
@@ -202,11 +238,24 @@ export default function Home() {
     setCropRect(null);
     setCropUndo(null);
     setLivePreview(null);
+    addAudit('İYİLEŞTİRME UYGULA', 'İyileştirme stüdyosu reçetesi ana görüntüye yazıldı');
     toast({
       title: 'İyileştirme uygulandı',
       description: 'Sonuç ana görüntüde. Karşılaştırma modlarıyla önce/sonra inceleyebilir, araç çubuğundaki ↓ ile indirebilirsiniz.',
     });
-  }, [toast]);
+  }, [toast, addAudit]);
+
+  /* ---------------- karşılaştırma stüdyosu ---------------- */
+  const handleApplyCompare = useCallback((out: ImageData, label: string) => {
+    const g = mixToGray(out, [0.299, 0.587, 0.114]);
+    setProcessed({ out, hist: histogram(g), ms: 0 });
+    setAppliedMode('compare');
+    setCropMode(false);
+    setCropRect(null);
+    setCropUndo(null);
+    setLivePreview(null);
+    addAudit('FARK HARİTASI UYGULA', label || 'iki delil karşılaştırması');
+  }, [addAudit]);
 
   /* ---------------- inceleme varyantı kesme ---------------- */
   const enterCrop = useCallback(() => {
@@ -269,6 +318,7 @@ export default function Home() {
       setAnomalies(regions);
       setShowAnomalies(true);
       setScanning(false);
+      addAudit('ANOMALİ TARAMASI', regions.length ? `${regions.length} şüpheli bölge` : 'anomali bulunamadı');
       toast({
         title: regions.length ? `${regions.length} şüpheli bölge işaretlendi` : 'Anomali bulunamadı',
         description: regions.length
@@ -276,7 +326,7 @@ export default function Home() {
           : 'Bantlar arası tutarlı görünüyor; yine de manuel bant incelemesi önerilir.',
       });
     }, 30);
-  }, [srcImg, toast]);
+  }, [srcImg, toast, addAudit]);
 
   /* ---------------- yardımcılar ---------------- */
   const rotate = () => {
@@ -307,6 +357,7 @@ export default function Home() {
     if (!processed) return;
     const url = imageDataToDataUrl(processed.out, 4096, 0.95, 'image/png');
     downloadDataUrl(url, `${imgName.replace(/\.[^.]+$/, '')}_${band.id}.png`);
+    addAudit('GÖRÜNTÜ İNDİR', `${band.name} modu PNG`);
     toast({ title: 'İşlenmiş görüntü indirildi', description: `${band.name} modu` });
   };
 
@@ -322,6 +373,8 @@ export default function Home() {
     ? 'CANLI İNCE AYAR · İYİLEŞTİRMELER GÖRÜNTÜLEYİCIDE ANLIK GÖRÜNÜR · UYGULA İLE KALICI OLUR'
     : appliedMode === 'recovery'
       ? `MOD: İNCELEME VARYANTI · ${processed ? `${processed.out.width}×${processed.out.height} PX` : 'TAM ÇÖZÜNÜRLÜK'} · KURTARMA ATÖLYESİ`
+      : appliedMode === 'compare'
+        ? `MOD: İNCELEME VARYANTI · FARK HARİTASI · ${processed ? `${processed.out.width}×${processed.out.height} PX` : ''}`
       : appliedMode === 'enhance'
         ? `MOD: İYİLEŞTİRME STÜDYOSU · UYGULANMIŞ GÖRÜNTÜ · ${processed ? `${processed.out.width}×${processed.out.height} PX` : 'TAM ÇÖZÜNÜRLÜK'}`
         : processed
@@ -342,6 +395,7 @@ export default function Home() {
         }}
       >
         <Header onCamera={() => setCameraOpen(true)} onUpload={() => fileInputRef.current?.click()}
+          onPdf={() => fileInputRef.current?.click()}
           compact />
         <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-8 px-4 py-10">
           <div className="text-center">
@@ -358,7 +412,9 @@ export default function Home() {
               tahrip izlerini görünür kılın, yerleşik OCR ile yazıyı okuyun, yapay zekâ adli
               analiz raporu alın — kriminal laboratuvar iş akışı, tarayıcınızda. İyileştirme
               Stüdyosu ile fotoğraflarınızın pozlamasını, renklerini ve netliğini tek tuşla
-              düzeltin.
+              düzeltin. Taranmış PDF'leri sayfa sayfa açın; iki delili karşılaştırın; SHA-256 delil
+              bütünlüğü, EXIF yazılım izleri, barkod/QR okuma ve ölçüm araçlarıyla resmî raporu
+              güçlendirin.
             </p>
           </div>
 
@@ -381,7 +437,7 @@ export default function Home() {
               </Button>
             </div>
             <p className="font-mono text-[10px] text-muted-foreground/70">
-              PANODAN GÖRSEL YAPIŞTIRMA (CTRL+V) VE VİDEO DOSYALARI DESTEKLENİR
+              PANODAN GÖRSEL YAPIŞTIRMA (CTRL+V) · VİDEO VE ÇOK SAYFALI PDF DOSYALARI DESTEKLENİR
             </p>
           </div>
 
@@ -418,7 +474,7 @@ export default function Home() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/*"
+          accept="image/*,video/*,application/pdf,.pdf"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -438,9 +494,16 @@ export default function Home() {
       <Header
         onCamera={() => setCameraOpen(true)}
         onUpload={() => fileInputRef.current?.click()}
+        onPdf={() => fileInputRef.current?.click()}
       />
 
-      <main className="grid flex-1 grid-cols-1 gap-0 lg:flex-none lg:grid-cols-[minmax(0,1fr)_410px] lg:h-[calc(100vh_-_89px)] lg:overflow-hidden">
+      <ExhibitBar
+        activeName={imgName}
+        currentDataUrl={srcDataUrl}
+        onLoad={(url, name) => loadFromDataUrl(url, name)}
+      />
+
+      <main className="grid flex-1 grid-cols-1 gap-0 lg:flex-none lg:grid-cols-[minmax(0,1fr)_410px] lg:h-[calc(100vh_-_125px)] lg:overflow-hidden">
         {/* görüntüleyici + araç çubuğu */}
         <section className="flex flex-col border-b border-border lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r">
           {activeTab === 'video' ? (
@@ -449,7 +512,7 @@ export default function Home() {
             <>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Badge variant="outline" className="gap-1.5 border-amber-600/50 font-mono text-[10px] text-amber-500">
-              <Landmark className="size-3" /> {appliedMode === 'recovery' ? 'İnceleme Varyantı · KURTARMA' : appliedMode === 'enhance' ? 'İyileştirme Stüdyosu · UYGULANDI' : `${band.name} · ${band.nm}`}
+              <Landmark className="size-3" /> {appliedMode === 'recovery' ? 'İnceleme Varyantı · KURTARMA' : appliedMode === 'compare' ? 'İnceleme Varyantı · FARK HARİTASI' : appliedMode === 'enhance' ? 'İyileştirme Stüdyosu · UYGULANDI' : `${band.name} · ${band.nm}`}
             </Badge>
             {processing && (
               <Badge variant="outline" className="gap-1 border-emerald-700/50 font-mono text-[10px] text-emerald-400">
@@ -595,6 +658,9 @@ export default function Home() {
               <TabsTrigger value="lab" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-cyan-400"><FlaskConical className="size-3" />LAB</TabsTrigger>
               <TabsTrigger value="iyilestir" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-sky-400"><Sparkles className="size-3" />İYİLEŞTİR</TabsTrigger>
               <TabsTrigger value="video" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-emerald-400"><Video className="size-3" />VİDEO</TabsTrigger>
+              <TabsTrigger value="karsilastir" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-rose-400"><GitCompareArrows className="size-3" />KARŞILAŞTIR</TabsTrigger>
+              <TabsTrigger value="delil" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-fuchsia-400"><ShieldCheck className="size-3" />DELİL</TabsTrigger>
+              <TabsTrigger value="arac" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono text-indigo-300"><Ruler className="size-3" />ARAÇLAR</TabsTrigger>
               <TabsTrigger value="ocr" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><ScanText className="size-3" />OCR</TabsTrigger>
               <TabsTrigger value="ai" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><BrainCircuit className="size-3" />YZ</TabsTrigger>
               <TabsTrigger value="rapor" className="flex-none h-8 gap-1 px-2.5 text-[10px] font-mono"><FileDown className="size-3" />RAPOR</TabsTrigger>
@@ -634,6 +700,17 @@ export default function Home() {
                 <TabsContent value="video" className="mt-0">
                   <VideoPanel studio={video} />
                 </TabsContent>
+                <TabsContent value="karsilastir" className="mt-0">
+                  <ComparePanel original={srcImg} onApply={handleApplyCompare} />
+                </TabsContent>
+                <TabsContent value="delil" className="mt-0">
+                  <EvidencePanel srcDataUrl={srcDataUrl} srcSha={srcSha}
+                    srcBytes={srcBytes} srcImg={srcImg}
+                    imageInfo={`${imgName} · ${srcImg.width}×${srcImg.height}`} />
+                </TabsContent>
+                <TabsContent value="arac" className="mt-0">
+                  <MeasurePanel image={processed?.out ?? srcImg} />
+                </TabsContent>
                 <TabsContent value="ocr" className="mt-0">
                   <OcrPanel processed={processed?.out ?? null} original={srcImg}
                     region={region} onBoxes={onBoxes} />
@@ -644,7 +721,8 @@ export default function Home() {
                 </TabsContent>
                 <TabsContent value="rapor" className="mt-0">
                   <ReportPanel processed={processed?.out ?? null} original={srcImg} params={params}
-                    imageInfo={`${imgName} · ${srcImg.width}×${srcImg.height}`} />
+                    imageInfo={`${imgName} · ${srcImg.width}×${srcImg.height}`}
+                    srcSha={srcSha} srcBytes={srcBytes} />
                 </TabsContent>
             </div>
           </Tabs>
@@ -659,7 +737,7 @@ export default function Home() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf,.pdf"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -667,6 +745,8 @@ export default function Home() {
           e.target.value = '';
         }}
       />
+      <PdfPagePicker file={pdfFile} open={pdfOpen} onOpenChange={setPdfOpen}
+        onPick={(url, name) => loadFromDataUrl(url, name)} />
       <CameraCapture open={cameraOpen} onOpenChange={setCameraOpen}
         onCapture={(url) => loadFromDataUrl(url, 'kamera_cekim.jpg')} />
     </div>
@@ -676,10 +756,11 @@ export default function Home() {
 /* ---------------- ortak parçalar ---------------- */
 
 function Header({
-  onCamera, onUpload, compact = false,
+  onCamera, onUpload, onPdf, compact = false,
 }: {
   onCamera: () => void;
   onUpload: () => void;
+  onPdf: () => void;
   compact?: boolean;
 }) {
   const caseNo = useCaseStore((s) => s.caseNo);
@@ -693,7 +774,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.4
+              ADLİ BELGE İNCELEME KONSOLU · REV 9.5
             </div>
           </div>
         </div>
@@ -712,6 +793,9 @@ function Header({
           </Button>
           <Button size="sm" variant="outline" onClick={onUpload} className="h-9 gap-1.5">
             <Upload className="size-4" /> Yükle
+          </Button>
+          <Button size="sm" variant="outline" onClick={onPdf} className="h-9 gap-1.5">
+            <FileText className="size-4" /> PDF
           </Button>
         </div>
       </div>
