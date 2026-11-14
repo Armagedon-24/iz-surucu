@@ -24,6 +24,7 @@ import { ImageViewer, type CropRect, type OcrBox } from '@/components/forensic/v
 import { SpectralPanel, ProcessPanel } from '@/components/forensic/panels';
 import { OcrPanel } from '@/components/forensic/ocr-panel';
 import { AiPanel } from '@/components/forensic/ai-panel';
+import { APP_REV } from '@/lib/forensic/version';
 import { ReportPanel } from '@/components/forensic/report-panel';
 import { RecoveryPanel } from '@/components/forensic/recovery-panel';
 import { ErasurePanel } from '@/components/forensic/erasure-panel';
@@ -856,7 +857,7 @@ function Header({
               İz<span className="text-sky-400">Sürücü</span>
             </div>
             <div className="font-mono text-[9px] tracking-[0.2em] text-muted-foreground">
-              ADLİ BELGE İNCELEME KONSOLU · REV 9.9
+              ADLİ BELGE İNCELEME KONSOLU · {APP_REV}
             </div>
           </div>
         </div>
