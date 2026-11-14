@@ -14,6 +14,8 @@ interface AnalyzeBody {
   task?: 'forensic' | 'read' | 'erasure';
   processedList?: string[];
   variantLabels?: string[];
+  /** İstemcinin zorladığı vision modeli (boş/geçersizse otomatik zincir). */
+  model?: string;
 }
 
 const SYSTEM_PROMPT = `Sen bir adli belge inceleme (questioned document examination) uzmanısın.
@@ -130,6 +132,26 @@ kısa madde; "gerekce" tek cümleyi geçmesin. Toplam yanıt 300 kelimeyi geçme
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Vision completion yanıtı — SDK'nın yapılandırılmamış ham biçimi. */
+interface VisionCompletion {
+  choices?: { message?: { content?: string } }[];
+  usage?: unknown;
+}
+
+/**
+ * MODEL ZİNCİRİ — "başka bir yapay zekâ ile okuma" desteği.
+ * İstemci bir model seçebilir; seçilmezse ZAI_MODEL (veya glm-4.6v-flash) ile
+ * başlanır. Başarısız her denemede zincirdeki bir sonraki modele geçilir:
+ * hızlı/ücretsiz model yazıyı okumazsa (veya kademe hatası verirse) güçlü
+ * görme modelleri otomatik denenir.
+ */
+const VISION_MODELS = ['glm-4.6v-flash', 'glm-4.5v', 'glm-4.6v'];
+
+function modelChain(override?: string): string[] {
+  const primary = override?.trim() || aiModel();
+  return [primary, ...VISION_MODELS.filter((m) => m !== primary)];
+}
+
 /** Vision token sayısı megapiksel ile büyür — bu eşiği aşan görüntü küçültülür. */
 const MAX_IMAGE_PIXELS = 1_150_000; // ≈ 1024×1123
 const MAX_IMAGE_BYTES = 900_000;    // ≈ 0.9 MB ham JPEG — gereksiz büyük yükleri yeniden kodla
@@ -150,17 +172,21 @@ function parseDataUrl(url: string): { mime: string; buffer: Buffer } | null {
  * Vision token'ı piksele bağlı olduğundan bu, gecikmeyi doğrudan düşürür;
  * yazı izleri 1150 px'de korunur. Hata olursa orijinal geçirilir.
  */
-async function normalizeImage(url: string): Promise<{ url: string; resized: boolean }> {
+async function normalizeImage(
+  url: string,
+  capPx = MAX_IMAGE_PIXELS,
+  capEdge = 1150,
+): Promise<{ url: string; resized: boolean }> {
   const parsed = parseDataUrl(url);
   if (!parsed) return { url, resized: false };
   try {
     const img = sharp(parsed.buffer, { failOn: 'none' });
     const meta = await img.metadata();
     const px = (meta.width ?? 0) * (meta.height ?? 0);
-    const tooBig = px > MAX_IMAGE_PIXELS || parsed.buffer.length > MAX_IMAGE_BYTES;
+    const tooBig = px > capPx || parsed.buffer.length > MAX_IMAGE_BYTES;
     if (!tooBig) return { url, resized: false };
     const out = await img
-      .resize({ width: 1150, height: 1150, fit: 'inside', withoutEnlargement: true })
+      .resize({ width: capEdge, height: capEdge, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 82 })
       .toBuffer();
     return { url: `data:image/jpeg;base64,${out.toString('base64')}`, resized: true };
@@ -204,18 +230,21 @@ function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  * Vision çağrısını geçici hatalara (401/429/5xx/ağ) karşı yeniden dener.
  * Her denemede ZAI örneği tazelenir — böylece kimlik bilgisi rotasyonu
  * (ör. "missing X-Token header" 401'i) otomatik olarak toparlanır.
- * Zaman aşımı TOTAL_BUDGET_MS içinde en fazla bir kez yeniden denenir;
- * bütçe bitince hemen fırlatılır (yanıt yine JSON döner).
+ * Denemeler arasında MODEL ZİNCİRİ de ilerler: bir model kademe/hata verirse
+ * sıradaki güçlü model denenir. Zaman aşımı bütçe içinde en fazla iki
+ * yeniden deneme yapar; bütçe bitince hemen fırlatılır (yanıt yine JSON döner).
  */
 async function createVisionWithRetry(
   system: string,
   userText: string,
   images: string[],
   maxTokens: number,
-) {
+  models: string[],
+): Promise<{ completion: VisionCompletion; model: string }> {
   const maxAttempts = 3;
   const start = Date.now();
   let lastError: unknown;
+  let lastModel = models[0];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const remaining = TOTAL_BUDGET_MS - (Date.now() - start);
@@ -223,10 +252,12 @@ async function createVisionWithRetry(
     // yine zaman aşımına uğrar ve ağ geçidi sınırını zorlar)
     if (remaining < 6000) break;
     const budget = Math.min(remaining, ATTEMPT_BUDGET_MS);
+    const model = models[Math.min(attempt - 1, models.length - 1)];
+    lastModel = model;
     try {
       const zai = await createAiClient(); // ortam değişkeni → dosya zinciri sırasıyla çözülür
       const body = {
-        model: aiModel(), // ZAI_MODEL ile geçersiz kılınabilir
+        model, // deneme sırasına göre zincirden gelir
         messages: [
           { role: 'system' as const, content: system },
           {
@@ -250,13 +281,14 @@ async function createVisionWithRetry(
         : zai.chat.completions.createVision(
             body as Parameters<typeof zai.chat.completions.createVision>[0]
           );
-      return await raceTimeout(call, budget, 'AI servisi');
+      const completion = await raceTimeout(call, budget, 'AI servisi');
+      return { completion, model };
     } catch (e) {
       lastError = e;
       const msg = (e as Error)?.message ?? '';
       const transient =
         /401|429|500|502|503|504|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|fetch failed/i.test(msg);
-      console.error(`[analyze] vision deneme ${attempt}/${maxAttempts} başarısız: ${msg.slice(0, 200)}`);
+      console.error(`[analyze] vision deneme ${attempt}/${maxAttempts} (${model}) başarısız: ${msg.slice(0, 200)}`);
       if (!transient || attempt === maxAttempts) break;
       // yalnızca yeniden denemeye değecek süre kaldıysa bekle ve tekrarla;
       // zaman aşımı sonrası kalan süre zaten yetmezse hemen fırlat
@@ -265,7 +297,9 @@ async function createVisionWithRetry(
       await sleep(Math.min(1200 * attempt, Math.max(0, remainingNow - 8000)));
     }
   }
-  throw lastError;
+  throw Object.assign(lastError instanceof Error ? lastError : new Error(String(lastError)), {
+    attemptedModel: lastModel,
+  });
 }
 
 /** Ham SDK hatalarını kullanıcı dostu Türkçe mesajlara çevirir. */
@@ -372,6 +406,12 @@ export async function POST(req: Request) {
     const variantLabels = Array.isArray(body.variantLabels)
       ? body.variantLabels.filter((l) => typeof l === 'string').slice(0, 4)
       : undefined;
+    // model zorlaması: yalnızca güvenli model-adı biçimi kabul edilir
+    const modelOverride =
+      typeof body.model === 'string' && /^[\w.:-]{2,60}$/.test(body.model.trim())
+        ? body.model.trim()
+        : undefined;
+    const models = modelChain(modelOverride);
 
     if (!original || typeof original !== 'string' || !original.startsWith('data:image')) {
       return NextResponse.json(
@@ -397,8 +437,15 @@ export async function POST(req: Request) {
       );
     }
 
-    // vision token'ı piksele bağlı: büyük görüntüler küçültülür (gecikme kontrolü)
-    const norm = await Promise.all(rawImages.map(normalizeImage));
+    // vision token'ı piksele bağlı: büyük görüntüler küçültülür (gecikme kontrolü).
+    // 1-2 görüntülü istekte tavan yükseltilir (1150→1400px): el yazısı okumada
+    // her piksel önemli; 4-5 varyantlı karalama analizinde gecikme korunur.
+    const hiRes = rawImages.length <= 2;
+    const norm = await Promise.all(
+      rawImages.map((u) =>
+        normalizeImage(u, hiRes ? 2_000_000 : MAX_IMAGE_PIXELS, hiRes ? 1400 : 1150),
+      ),
+    );
     const images = norm.map((n) => n.url);
     const resizedCount = norm.filter((n) => n.resized).length;
     if (resizedCount > 0) console.error(`[analyze] ${resizedCount}/${images.length} görüntü küçültüldü`);
@@ -438,9 +485,9 @@ export async function POST(req: Request) {
           .join('\n');
 
     const t0 = Date.now();
-    const completion = await createVisionWithRetry(system, userText, images, maxTokens);
+    const { completion, model } = await createVisionWithRetry(system, userText, images, maxTokens, models);
     console.error(
-      `[analyze] vision tamam: ${Math.round((Date.now() - t0) / 1000)} sn, ` +
+      `[analyze] vision tamam (${model}): ${Math.round((Date.now() - t0) / 1000)} sn, ` +
         `usage: ${JSON.stringify((completion as { usage?: unknown })?.usage ?? {})}`,
     );
 
@@ -468,7 +515,7 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, result, raw: content });
+    return NextResponse.json({ ok: true, result, raw: content, model });
   } catch (e) {
     console.error('[analyze] nihai hata:', (e as Error)?.message ?? e);
     const { message, status } = friendlyError(e);

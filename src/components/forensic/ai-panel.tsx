@@ -61,6 +61,8 @@ export function AiPanel({
   const [result, setResult] = useState<AiResult | null>(null);
   const [raw, setRaw] = useState('');
   const [question, setQuestion] = useState('');
+  const [modelSel, setModelSel] = useState('');
+  const [usedModel, setUsedModel] = useState('');
   const addAnalysis = useCaseStore((s) => s.addAnalysis);
   const band = useCaseStore((s) => s.caseNo);
 
@@ -69,6 +71,7 @@ export function AiPanel({
     setLoading(true);
     setResult(null);
     setRaw('');
+    setUsedModel('');
     try {
       // 1000px / q0.78: model iç çözünürlüğü için yeterli, gecikmeyi ciddi düşürür
       const payload = {
@@ -77,15 +80,18 @@ export function AiPanel({
         bandLabel,
         ocrText: ocrText.slice(0, 1500),
         question: question.slice(0, 400),
+        model: modelSel || undefined,
       };
       const json = await postJsonSafe<{
         ok: boolean;
         result?: AiResult;
         raw?: string;
+        model?: string;
         error?: string;
       }>('/api/analyze', payload);
       setResult(json.result ?? null);
       setRaw(json.raw ?? '');
+      setUsedModel(json.model ?? '');
       if (json.result) {
         addAnalysis({
           id: `${Date.now()}`,
@@ -95,7 +101,7 @@ export function AiPanel({
           raw: json.raw ?? '',
         });
       }
-      toast({ title: 'YZ analizi tamamlandı' });
+      toast({ title: 'YZ analizi tamamlandı', description: json.model ? `model: ${json.model}` : undefined });
     } catch (e) {
       toast({
         title: 'YZ analizi hatası',
@@ -144,7 +150,23 @@ export function AiPanel({
         Yapay zekâ modeli <span className="text-foreground/80">orijinal fotoğrafı</span> ve
         <span className="text-foreground/80"> seçili spektral bantta işlenmiş görüntüyü</span> birlikte
         değerlendirir; metni okur, silme/tahrip şüphesi, mürekkep farklılıkları ve sonradan ekleme
-        bulgularını raporlar. İşlem birkaç saniye sürebilir.
+        bulgularını raporlar. İşlem birkaç saniye sürebilir. Yazıyı okumazsa
+        <span className="text-foreground/80"> başka bir model seçin</span> — Otomatik seçimde bir model
+        hata verirse zincirdeki güçlü model kendiliğinden denenir.
+      </div>
+
+      <div>
+        <Label className="mb-1 block text-xs text-foreground/85">YZ modeli</Label>
+        <select
+          value={modelSel}
+          onChange={(e) => setModelSel(e.target.value)}
+          className="h-9 w-full rounded-md border border-border bg-black/40 px-2 font-mono text-[12px] text-foreground/90 outline-none focus:border-emerald-700"
+        >
+          <option value="">OTOMATİK — zincir: flash → 4.5v → 4.6v</option>
+          <option value="glm-4.6v-flash">glm-4.6v-flash — hızlı, ücretsiz kademe</option>
+          <option value="glm-4.5v">glm-4.5v — güçlü görme modeli</option>
+          <option value="glm-4.6v">glm-4.6v — en güçlü görme modeli</option>
+        </select>
       </div>
 
       <div>
@@ -203,6 +225,11 @@ export function AiPanel({
 
       {result && (
         <section className="flex flex-col gap-3">
+          {usedModel && (
+            <div className="font-mono text-[10px] tracking-wider text-muted-foreground">
+              OKUMA MODELİ: <span className="text-emerald-400">{usedModel}</span>
+            </div>
+          )}
           {typeof result.guven === 'number' && (
             <div>
               <div className="mb-1 flex justify-between font-mono text-[11px]">
