@@ -108,6 +108,11 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
     const live = pending.length ? [...pending, hover ?? pending[pending.length - 1]] : undefined;
+    // işaretlemeler görüntü koordinatlarında çizilir — tampon görüntüden
+    // scale oranında küçültüldüğü için transform olmadan canvas dışına
+    // düşüyordu ve panelde cetvel/işaretleme hiç görünmüyordu (REV 9.11)
+    ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
     try {
       drawAnnotations(ctx, annotations, {
         ctx, scale, pxPerMm, livePts: live,
@@ -117,6 +122,8 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
     } catch (err) {
       // tek bir bozuk kayıt paneli boşaltmasın — kanvas görüntüsü yerinde kalır
       console.error('Anotasyon çizimi hatası', err);
+    } finally {
+      ctx.restore();
     }
   }, [image, annotations, pending, hover, scale, pxPerMm, wrapW, thickness]);
 
@@ -187,7 +194,8 @@ export function MeasurePanel({ image }: { image: ImageData | null }) {
         };
         next = annotations.map((a) => (a.id === drag.annId ? moveAnnotationPoint(a, drag.index, clamped) : a));
       } else {
-        next = annotations.map((a) => (a.id === drag.annId ? translateAnnotation(a, p.x - drag.start.x, p.y - drag.start.y) : a));
+        // kelepçe: gövdeden taşıma belge dışına çıkamaz (cetvel kaybolmaz)
+        next = annotations.map((a) => (a.id === drag.annId ? translateAnnotation(a, p.x - drag.start.x, p.y - drag.start.y, { w: image.width, h: image.height }) : a));
       }
       setAnnotations(next);
       return;

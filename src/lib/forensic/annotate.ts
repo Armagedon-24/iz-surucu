@@ -402,8 +402,11 @@ export function hitAnnotation(
     const a = anns[i];
     const q = a.pts;
     let hit = false;
+    // cetvel/kalibrasyon gövdesi: bant görseli çizgiden ~u×1.2 yarı genişlikte
+    // olduğu için tolerans diğer şekillerden cömerttir (tutup ıskalamak pan
+    // başlatıyordu — REV 9.11)
     if (a.kind === 'ruler' || a.kind === 'arrow' || a.kind === 'calib') {
-      hit = q.length === 2 && segDist(q[0], q[1], p) <= tol * 1.6;
+      hit = q.length === 2 && segDist(q[0], q[1], p) <= tol * 3;
     } else if (a.kind === 'angle') {
       hit = q.length === 3 && (segDist(q[0], q[1], p) <= tol * 1.6 || segDist(q[1], q[2], p) <= tol * 1.6);
     } else if (a.kind === 'circle') {
@@ -433,9 +436,78 @@ export function moveAnnotationPoint(
   return { ...a, pts: a.pts.map((q, i) => (i === index ? p : q)) };
 }
 
-/** Tüm işaretlemeyi (dx, dy) kadar kaydırır. */
-export function translateAnnotation(a: Annotation, dx: number, dy: number): Annotation {
-  return { ...a, pts: a.pts.map((q) => ({ x: q.x + dx, y: q.y + dy })) };
+/**
+ * Tüm işaretlemeyi (dx, dy) kadar kaydırır. Bounds verilirse kaydın nokta
+ * kutusu görüntü içinde kalmaya kelepçelenir — yoksa cetvel gövdesinden
+ * sürüklenip belgenin dışına taşınarak ekrandan kaybolabiliyordu (REV 9.11).
+ */
+export function translateAnnotation(
+  a: Annotation,
+  dx: number,
+  dy: number,
+  bounds?: { w: number; h: number },
+): Annotation {
+  let ndx = dx;
+  let ndy = dy;
+  if (bounds && a.pts.length) {
+    const xs = a.pts.map((q) => q.x);
+    const ys = a.pts.map((q) => q.y);
+    const x0 = Math.min(...xs);
+    const x1 = Math.max(...xs);
+    const y0 = Math.min(...ys);
+    const y1 = Math.max(...ys);
+    // izinli aralık: kutu kenarı görüntü kenarına dayanır; kutu görüntüden
+    // genişse (aşırı zoom-out) ortalanır
+    const loX = -x0;
+    const hiX = bounds.w - x1;
+    const loY = -y0;
+    const hiY = bounds.h - y1;
+    ndx = loX <= hiX ? Math.max(loX, Math.min(hiX, dx)) : (loX + hiX) / 2;
+    ndy = loY <= hiY ? Math.max(loY, Math.min(hiY, dy)) : (loY + hiY) / 2;
+  }
+  return { ...a, pts: a.pts.map((q) => ({ x: q.x + ndx, y: q.y + ndy })) };
+}
+
+/**
+ * Verilen noktaya gövdesi en yakın olan işaretlemeyi döndürür (mesafe sınırı
+ * içinde). TAŞI modunda kullanıcının cetveli tutup ıskalaması — hit-test
+ * toleransı bant görselinden darsa pan başlıyor ve cetvel ekrandan
+ * kayboluyordu (REV 9.11) — yerine cömert yakalama sağlar.
+ */
+export function nearestAnnotationBody(
+  anns: Annotation[],
+  p: { x: number; y: number },
+  maxDist: number,
+): AnnotationHit | null {
+  let best: AnnotationHit | null = null;
+  let bestD = maxDist;
+  for (let i = anns.length - 1; i >= 0; i--) {
+    const a = anns[i];
+    const q = a.pts;
+    let d = Infinity;
+    if ((a.kind === 'ruler' || a.kind === 'arrow' || a.kind === 'calib') && q.length === 2) {
+      d = segDist(q[0], q[1], p);
+    } else if (a.kind === 'angle' && q.length === 3) {
+      d = Math.min(segDist(q[0], q[1], p), segDist(q[1], q[2], p));
+    } else if (a.kind === 'circle' && q.length === 2) {
+      d = Math.abs(dist(q[0], p) - dist(q[0], q[1]));
+    } else if (a.kind === 'rect' && q.length === 2) {
+      const x0 = Math.min(q[0].x, q[1].x);
+      const x1 = Math.max(q[0].x, q[1].x);
+      const y0 = Math.min(q[0].y, q[1].y);
+      const y1 = Math.max(q[0].y, q[1].y);
+      const dx = Math.max(x0 - p.x, 0, p.x - x1);
+      const dy = Math.max(y0 - p.y, 0, p.y - y1);
+      d = Math.hypot(dx, dy);
+    } else if (a.kind === 'text' && q.length >= 1) {
+      d = dist(q[0], p);
+    }
+    if (d < bestD) {
+      bestD = d;
+      best = { ann: a, index: -1 };
+    }
+  }
+  return best;
 }
 
 /** Tüm anotasyonları (ve canlı seçimi) ekrana çizer. */

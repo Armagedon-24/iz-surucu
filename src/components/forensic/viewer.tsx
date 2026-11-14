@@ -20,6 +20,7 @@ import type { AnomalyRegion } from '@/lib/forensic/pipeline';
 import {
   ANN_COLORS, ANN_THICKNESS, KIND_LABELS, requiredPoints, dist, mmLabel, angleDeg,
   drawAnnotations, hitAnnotation, moveAnnotationPoint, translateAnnotation,
+  nearestAnnotationBody,
   type Annotation, type AnnKind,
 } from '@/lib/forensic/annotate';
 import { useCaseStore } from '@/lib/forensic/store';
@@ -532,7 +533,13 @@ export function ImageViewer(props: ViewerProps) {
     // taşıma modunda boş alan normal pan olarak sürer
     if (annotEdit || drawing) {
       const p = toImage(e.clientX, e.clientY);
-      const hit = hitAnnotation(annotations, p, hitTol / scale);
+      let hit = hitAnnotation(annotations, p, hitTol / scale);
+      // TAŞI modunda ıska — cetveli tutunca bant toleransı aşılıyor ve pan
+      // başlıyordu; tüm görünüm kayıp cetvel ekrandan çıkıyordu (REV 9.11).
+      // Cömert yarıçapta en yakın işaretlemeyi yakala; pan yalnız boş alanda.
+      if (!hit && annotEdit && vTool === 'move' && annotations.length) {
+        hit = nearestAnnotationBody(annotations, p, (hitTol * 4) / scale);
+      }
       if (hit) {
         dragState.current = {
           mode: 'annot', sx: 0, sy: 0, stx: 0, sty: 0, rx0: 0, ry0: 0,
@@ -639,7 +646,8 @@ export function ImageViewer(props: ViewerProps) {
           y: Math.max(0, Math.min(ih, p.y)),
         });
       } else {
-        updated = translateAnnotation(ann, p.x - start.x, p.y - start.y);
+        // kelepçe: cetvel gövdeden taşınırken belge dışına çıkıp kaybolamaz
+        updated = translateAnnotation(ann, p.x - start.x, p.y - start.y, { w: iw, h: ih });
       }
       onAnnotationsChange(annotations.map((x) => (x.id === annId ? updated : x)));
     } else if (ds.mode === 'crop') {
