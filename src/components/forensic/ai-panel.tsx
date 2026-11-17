@@ -163,7 +163,7 @@ export function AiPanel({
           className="h-9 w-full rounded-md border border-border bg-black/40 px-2 font-mono text-[12px] text-foreground/90 outline-none focus:border-emerald-700"
         >
           <option value="">OTOMATİK — zincir: flash → 4.5v → 4.6v</option>
-          <option value="glm-4.6v-flash">glm-4.6v-flash — hızlı, ücretsiz kademe</option>
+          <option value="glm-5.3-flash">glm-5.3-flash — hızlı, ücretsiz kademe</option>
           <option value="glm-4.5v">glm-4.5v — güçlü görme modeli</option>
           <option value="glm-4.6v">glm-4.6v — en güçlü görme modeli</option>
         </select>

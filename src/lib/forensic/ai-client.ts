@@ -82,13 +82,14 @@ export function aiConfigStatus(): AiConfigStatus {
 /**
  * Kullanılacak vision modeli — ZAI_MODEL ile geçersiz kılınabilir.
  *
- * Varsayılan glm-4.6v-flash: vision (görüntü) sınıfından ve ücretsiz kademede.
- * glm-5.3-flash gibi salt-metin modelleri vision isteğinde (image_url parçası)
+ * Varsayılan glm-5.3-flash: varsayılan vision modeli ( ücretsiz kademede).
+ * glm-4.6v-flash gibi görüntü modelleri image_url parçası ile kullanılabilir;
+ * salt-METİN modelleri vision isteğinde platform tarafından reddedilir.
  * platform tarafından reddedilir — analiz istemcisi her zaman görüntü gönderir,
  * bu yüzden varsayılan mutlaka V modelli olmalıdır.
  */
 export function aiModel(): string {
-  return process.env.ZAI_MODEL?.trim() || 'glm-4.6v-flash';
+  return process.env.ZAI_MODEL?.trim() || 'glm-5.3-flash';
 }
 
 /**
@@ -114,11 +115,11 @@ export function classifyUpstreamError(
     case '1005':
       return { message: 'Hesap iki aşamalı doğrulama istiyor (kod 1005): z.ai hesabınızda 2FA/telefon doğrulamasını tamamlayın.', status: 502 };
     case '1113':
-      return { message: 'Hesap bakiyesi/paketi yetersiz (kod 1113): z.ai → Billing bölümünden bakiye yükleyin veya kaynak paketi ekleyin. (glm-4.6v-flash ücretsiz kademededir.)', status: 429 };
+      return { message: 'Hesap bakiyesi/paketi yetersiz (kod 1113): z.ai → Billing bölümünden bakiye yükleyin veya kaynak paketi ekleyin. (glm-5.3-flash ücretsiz kademededir.)', status: 429 };
     case '1211':
-      return { message: 'Model adı tanımsız (kod 1211): ZAI_MODEL değerini vision sınıfından bir modelle değiştirin (örn. glm-4.6v-flash).', status: 502 };
+      return { message: 'Model adı tanımsız (kod 1211): ZAI_MODEL değerini vision sınıfından bir modelle değiştirin (örn. glm-5.3-flash).', status: 502 };
     case '1311':
-      return { message: 'Abonelik planı bu modele erişim vermiyor (kod 1311): ZAI_MODEL olarak ücretsiz glm-4.6v-flash kullanın.', status: 502 };
+      return { message: 'Abonelik planı bu modele erişim vermiyor (kod 1311): ZAI_MODEL olarak ücretsiz glm-5.3-flash kullanın.', status: 502 };
     case '1220':
       return { message: 'Bu API çağrısına erişim izni yok (kod 1220): anahtarın kapsadığı servisi z.ai panelinden kontrol edin.', status: 503 };
   }

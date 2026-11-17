@@ -140,12 +140,12 @@ interface VisionCompletion {
 
 /**
  * MODEL ZİNCİRİ — "başka bir yapay zekâ ile okuma" desteği.
- * İstemci bir model seçebilir; seçilmezse ZAI_MODEL (veya glm-4.6v-flash) ile
+ * İstemci bir model seçebilir; seçilmezse ZAI_MODEL (veya glm-5.3-flash) ile
  * başlanır. Başarısız her denemede zincirdeki bir sonraki modele geçilir:
  * hızlı/ücretsiz model yazıyı okumazsa (veya kademe hatası verirse) güçlü
  * görme modelleri otomatik denenir.
  */
-const VISION_MODELS = ['glm-4.6v-flash', 'glm-4.5v', 'glm-4.6v'];
+const VISION_MODELS = ['glm-5.3-flash', 'glm-4.5v', 'glm-4.6v'];
 
 function modelChain(override?: string): string[] {
   const primary = override?.trim() || aiModel();

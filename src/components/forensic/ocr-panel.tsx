@@ -62,6 +62,34 @@ const PSM_LABELS: Record<PsmKey, string> = {
   sparse: 'Seyrek metin',
 };
 
+// OCR ön işleme: kontrast artırma, eşikleme, noise reduction
+const preprocessForOcr = (imgData: ImageData): ImageData => {
+  const { width, height, data } = imgData;
+  const out = new ImageData(width, height);
+  const outData = out.data;
+
+  // Gri tonlamaya çevir + kontrast + eşikleme (Otsu benzeri)
+  let r, g, b, gray;
+  for (let i = 0; i < data.length; i += 4) {
+    r = data[i];
+    g = data[i + 1];
+    b = data[i + 2];
+    gray = (0.299 * r + 0.587 * g + 0.114 * b) | 0;
+
+    // Kontrast artırma (linear stretch)
+    const contrasted = Math.min(255, Math.max(0, 255 - Math.abs(128 - gray)));
+
+    // Basit eşikleme: 128 eşik değerini kullan
+    const threshold = contrasted > 128 ? 255 : 0;
+
+    outData[i] = threshold;     // R
+    outData[i + 1] = threshold; // G
+    outData[i + 2] = threshold; // B
+    outData[i + 3] = 255;       // A
+  }
+  return out;
+};
+
 export function OcrPanel({
   processed,
   original,
@@ -84,6 +112,7 @@ export function OcrPanel({
   const [source, setSource] = useState<'processed' | 'original'>('processed');
   const [psm, setPsm] = useState<PsmKey>('auto');
   const [showBoxes, setShowBoxes] = useState(true);
+  const [applyPreprocess, setApplyPreprocess] = useState(false);
   const lastBoxesRef = useRef<OcrBox[] | null>(null);
   const addOcr = useCaseStore((s) => s.addOcr);
 
@@ -139,6 +168,11 @@ export function OcrPanel({
           w: region.w * img.width,
           h: region.h * img.height,
         });
+      }
+
+      // OCR ön işleme: kontrast artırma + eşikleme (kalite artışı)
+      if (applyPreprocess) {
+        target = preprocessForOcr(target);
       }
 
       // ImageData → dataURL
@@ -221,6 +255,16 @@ export function OcrPanel({
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="ml-2">
+          <Switch
+            id="ocr-preprocess"
+            checked={applyPreprocess}
+            onCheckedChange={(v) => setApplyPreprocess(v)}
+          />
+          <Label htmlFor="ocr-preprocess" className="text-xs text-muted-foreground">
+            Ön işleme
+          </Label>
         </div>
       </section>
 
